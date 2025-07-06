@@ -1,4 +1,5 @@
 import abc
+from functools import partial
 
 import equinox as eqx
 import jax
@@ -75,7 +76,8 @@ def assert_positive_real(
     return jnp.clip(x_re, 0.0)
 
 
-@jax.jit
+# TODO: rework the function interface to better avoid the concretization error
+@partial(jax.jit, static_argnums=0, static_argnames="padding")
 def generate_circulant_embedding_method_1d(
     Nx: int,
     dx: float,
