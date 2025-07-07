@@ -10,5 +10,5 @@ wheels/
 .venv
 
 # PyClaw outputs
-_output/
+*/_output/
 */pyclaw.log

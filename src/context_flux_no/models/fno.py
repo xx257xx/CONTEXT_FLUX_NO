@@ -12,7 +12,7 @@ from ..nn import Fourier1D
 ## TODO: Add padding?
 class FNO1D(eqx.Module, strict=True):
     lift_layer: eqx.nn.MLP
-    fourier_layers = tuple[Fourier1D, ...]
+    fourier_layers: tuple[Fourier1D, ...]
     project_layer: eqx.nn.MLP
     activation: Callable
     data_dim: int = eqx.field(static=True)
@@ -68,6 +68,7 @@ class FNO1D(eqx.Module, strict=True):
             key=keys[-1],
         )
 
+        self.activation = activation
         self.data_dim = data_dim
         self.lift_dim = lift_dim
         self.depth = depth
@@ -76,20 +77,21 @@ class FNO1D(eqx.Module, strict=True):
         self.width_project = width_project
         self.depth_lift = depth_lift
         self.depth_project = depth_project
+        self.stack_grid = stack_grid
 
     @property
     def layers(self) -> tuple[eqx.Module, ...]:
         return (self.lift_layer, *self.fourier_layers, self.project_layer)
 
-    def forward(
+    def __call__(
         self, v: Float[Array, "in_channels grids"]
     ) -> Float[Array, "out_channels grids"]:
         if self.stack_grid:
-            grid = jnp.linspace(0, 1, v.shape[-1])
-            v = jnp.stack((v, grid), axis=0)
+            grid = jnp.expand_dims(jnp.linspace(0, 1, v.shape[-1]), axis=0)
+            v = jnp.concatenate((v, grid), axis=0)
 
-        v = eqx.filter_vmap(self.lift_layer, axis=-1)(v)
+        v = eqx.filter_vmap(self.lift_layer, in_axes=-1, out_axes=-1)(v)
         for fourier in self.fourier_layers:
             v = fourier(v)
-        v = eqx.filter_vmap(self.project_layer, axis=-1)(v)
+        v = eqx.filter_vmap(self.project_layer, in_axes=-1, out_axes=-1)(v)
         return v

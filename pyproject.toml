@@ -11,12 +11,16 @@ dependencies = [
     "clawpack>=5.12.0",
     "equinox>=0.12.2",
     "grain>=0.2.10",
+    "h5py>=3.14.0",
     "ipykernel>=6.29.5",
     "jax[cuda12]>=0.6.1",
     "jaxtyping>=0.3.2",
     "matplotlib>=3.10.3",
     "numpy>=2.3.0",
+    "optax>=0.2.5",
     "scipy>=1.15.3",
+    "tqdm>=4.67.1",
+    "xarray>=2025.7.0",
 ]
 
 [project.scripts]

@@ -3,8 +3,8 @@ from collections.abc import Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from equinox._misc import default_floating_dtype, named_scope
-from equinox.nn._misc import default_init
+from equinox._misc import default_floating_dtype
+from equinox.nn._misc import default_init, named_scope
 from jaxtyping import Array, Complex, Float, PRNGKeyArray
 
 from .misc import to_complex_dtype
@@ -73,19 +73,19 @@ class SpectralConv1D(eqx.Module, strict=True):
         - `key`: Ignored; provided for compatibility with the rest of the Equinox API.
             (Keyword only argument.)
 
-        For each frequency of the frequency_modes used in the layer, the spectal
+        For each frequency of the frequency_modes used in the layer, the spectral
         component corresponding to each input channel is linearly mixed to produce the
         spectral components of the output channels.
         """
         n_grids = v.shape[-1]
         v_fft: Complex[Array, "in_channels grids"] = jnp.fft.rfft(v)
         out_fft_trunc: Complex[Array, "out_channels frequency_modes"] = jax.vmap(
-            jnp.matvec, in_axes=-1
+            jnp.matvec, in_axes=-1, out_axes=-1
         )(self.weight, v_fft[:, 0 : self.frequency_modes])
         out_fft = jnp.zeros_like(v, shape=(self.out_channels, n_grids // 2 + 1))
         out_fft.at[:, 0 : self.frequency_modes].set(out_fft_trunc)
 
-        out = jnp.fft.rfft(out_fft, n=n_grids)
+        out = jnp.fft.irfft(out_fft, n=n_grids)
         return out
 
 
@@ -93,7 +93,7 @@ class Fourier1D(eqx.Module, strict=True):
     """1D Fourier layer, which is commonly stacked to create Fourier Neural
     Operators."""
 
-    spectal_conv: SpectralConv1D
+    spectral_conv: SpectralConv1D
     linear_transform: eqx.nn.Conv1d
     activation: Callable
     in_channels: int = eqx.field(static=True)
@@ -157,5 +157,5 @@ class Fourier1D(eqx.Module, strict=True):
         component corresponding to each input channel is linearly mixed to produce the
         spectral components of the output channels.
         """
-        v_out = self.spectal_conv(v) + self.linear_transform(v)
+        v_out = self.spectral_conv(v) + self.linear_transform(v)
         return self.activation(v_out)
