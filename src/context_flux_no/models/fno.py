@@ -8,17 +8,18 @@ from jaxtyping import Array, Float
 from ..nn import Fourier1D
 
 
-## TODO: Implement FNO and FluxFNO, test on Burgers to debug and test performance
+## TODO: Implement FNO2D and higher and FluxFNO, test on Burgers
 ## TODO: Add padding?
 class FNO1D(eqx.Module, strict=True):
     lift_layer: eqx.nn.MLP
     fourier_layers: tuple[Fourier1D, ...]
     project_layer: eqx.nn.MLP
     activation: Callable
-    data_dim: int = eqx.field(static=True)
+    input_dim: int = eqx.field(static=True)
     lift_dim: int = eqx.field(static=True)
     depth: int = eqx.field(static=True)
     frequency_modes: int = eqx.field(static=True)
+    output_dim: int = eqx.field(static=True)
     width_lift: int = eqx.field(static=True)
     width_project: int = eqx.field(static=True)
     depth_lift: int = eqx.field(static=True)
@@ -27,10 +28,11 @@ class FNO1D(eqx.Module, strict=True):
 
     def __init__(
         self,
-        data_dim: int,
+        input_dim: int,
         lift_dim: int,
         depth: int,
         frequency_modes: int,
+        output_dim: int | None = None,
         width_lift: int = 128,
         width_project: int = 128,
         depth_lift: int = 1,
@@ -44,7 +46,7 @@ class FNO1D(eqx.Module, strict=True):
         keys = jax.random.split(key, depth + 2)
 
         self.lift_layer = eqx.nn.MLP(
-            data_dim + 1 if stack_grid else data_dim,
+            input_dim + 1 if stack_grid else input_dim,
             lift_dim,
             width_lift,
             depth_lift,
@@ -58,9 +60,11 @@ class FNO1D(eqx.Module, strict=True):
             )
             for k in keys[1:-1]
         )
+
+        output_dim = input_dim if output_dim is None else output_dim
         self.project_layer = eqx.nn.MLP(
             lift_dim,
-            data_dim,
+            output_dim,
             width_project,
             depth_project,
             activation,
@@ -69,10 +73,11 @@ class FNO1D(eqx.Module, strict=True):
         )
 
         self.activation = activation
-        self.data_dim = data_dim
+        self.input_dim = input_dim
         self.lift_dim = lift_dim
         self.depth = depth
         self.frequency_modes = frequency_modes
+        self.output_dim = output_dim
         self.width_lift = width_lift
         self.width_project = width_project
         self.depth_lift = depth_lift
@@ -84,8 +89,8 @@ class FNO1D(eqx.Module, strict=True):
         return (self.lift_layer, *self.fourier_layers, self.project_layer)
 
     def __call__(
-        self, v: Float[Array, "in_channels grids"]
-    ) -> Float[Array, "out_channels grids"]:
+        self, v: Float[Array, "input_dim grids"]
+    ) -> Float[Array, "output_dim grids"]:
         if self.stack_grid:
             grid = jnp.expand_dims(jnp.linspace(0, 1, v.shape[-1]), axis=0)
             v = jnp.concatenate((v, grid), axis=0)
