@@ -46,12 +46,12 @@ def make_domain(x_span, Nx):
     match x_span, Nx:
         case tuple([float() | int(), float() | int()]), int():
             dim = pyclaw.Dimension(*x_span, Nx, name="x")
-        case [tuple([float() | int(), float() | int()]), *_], int():
+        case [[tuple([float() | int(), float() | int()]), *_], int()]:
             dim = [
                 pyclaw.Dimension(*x_span_i, Nx, name=f"x_{i}")
                 for i, x_span_i in enumerate(x_span)
             ]
-        case [tuple([float() | int(), float() | int()]), *_], [int(), _]:
+        case [[tuple([float() | int(), float() | int()]), *_], [int(), _]]:
             dim = [
                 pyclaw.Dimension(*x_span_i, Nx_i, name=f"x_{i}")
                 for i, (x_span_i, Nx_i) in enumerate(zip(x_span, Nx))
@@ -69,4 +69,4 @@ def apply_initial_condition(
 ) -> None:
     grid_centers = grid_centers_from_state(state)
     grid = np.meshgrid(*grid_centers)
-    state.q[0] = ic_factory(*grid)
+    state.q[0] = np.asarray(ic_factory(*grid))
