@@ -46,8 +46,6 @@ def pdesolve_pyclaw(
     _ = controller.run()
 
     u = solution_from_controller(controller)
-    t = np.linspace(
-        0, controller.tfinal, controller.num_output_times + 1, endpoint=True
-    )
+    t = np.asarray(controller.out_times)
     (x_grid,) = grid_centers_from_state(state)
     return u, t, x_grid

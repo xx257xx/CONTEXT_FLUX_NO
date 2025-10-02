@@ -20,11 +20,14 @@ def make_controller(
     controller = pyclaw.Controller()
     controller.solution = pyclaw.Solution(state, domain)
     controller.tfinal = t_span[1] - t_span[0]
-    controller.num_output_times = Nt
+    # Manually specify output times
+    controller.output_style = 2
+    controller.out_times = list(np.linspace(*t_span, Nt + 1, endpoint=True))
     # By default, keep the solution in memory and do not save
     # See https://www.clawpack.org/pyclaw/output.html for details
     controller.keep_copy = True
     controller.output_format = None
+
     return controller
 
 
