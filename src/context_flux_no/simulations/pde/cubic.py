@@ -65,6 +65,7 @@ class CubicFlux1D(eqx.Module):
         t_span: tuple[float, float],
         Nt: int,
         bc: Literal["periodic"],
+        **pdesolve_kwargs,
     ) -> tuple[
         Float[np.ndarray, "time dim x_grid"],
         Float[np.ndarray, " time"],
@@ -81,5 +82,13 @@ class CubicFlux1D(eqx.Module):
 
         problem_data = {"a": self.a, "b": self.b, "c": self.c}
         return pdesolve_pyclaw(
-            solver, problem_data, ic_factory, x_span, Nx, t_span, Nt, bc
+            solver,
+            problem_data,
+            ic_factory,
+            x_span,
+            Nx,
+            t_span,
+            Nt,
+            bc,
+            **pdesolve_kwargs,
         )

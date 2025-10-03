@@ -13,3 +13,6 @@ wheels/
 _output/
 temp/
 */pyclaw.log
+
+# Datasets
+data

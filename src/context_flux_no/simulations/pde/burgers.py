@@ -28,12 +28,21 @@ class Burgers1D(eqx.Module):
         t_span: tuple[float, float],
         Nt: int,
         bc: Literal["periodic"],
+        **pdesolve_kwargs,
     ) -> xr.DataArray:
         solver = pyclaw.ClawSolver1D(riemann.burgers_1D)
         solver.limiters = pyclaw.limiters.tvd.vanleer
 
         problem_data = {"efix": self.entropy_fix}
         u, t, x_grid = pdesolve_pyclaw(
-            solver, problem_data, ic_factory, x_span, Nx, t_span, Nt, bc
+            solver,
+            problem_data,
+            ic_factory,
+            x_span,
+            Nx,
+            t_span,
+            Nt,
+            bc,
+            **pdesolve_kwargs,
         )
         return solution_to_dataarray(u, t, x_grid, self.coeffs)

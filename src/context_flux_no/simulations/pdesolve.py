@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from typing import Literal
 
@@ -28,11 +29,18 @@ def pdesolve_pyclaw(
     t_span: tuple[float, float],
     Nt: int,
     bc: Literal["periodic"],
+    *,
+    verbose: bool = True,
 ) -> tuple[
     Float[np.ndarray, "time dim x_grid"],
     Float[np.ndarray, " time"],
     Float[np.ndarray, " x_grid"],
 ]:
+    if not verbose:
+        # See https://www.clawpack.org/pyclaw/output.html#logging
+        logger = logging.getLogger("pyclaw")
+        logger.setLevel(logging.CRITICAL)
+
     # Need to change for >1D cases
     solver.bc_lower[0] = solver.bc_upper[0] = bc_from_string(bc)
     domain = make_domain(x_span, Nx)
