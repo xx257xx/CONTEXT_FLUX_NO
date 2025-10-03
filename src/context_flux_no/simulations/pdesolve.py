@@ -2,8 +2,9 @@ from collections.abc import Callable
 from typing import Literal
 
 import numpy as np
+import xarray as xr
 from clawpack import pyclaw
-from jaxtyping import Float
+from jaxtyping import Array, Float
 
 from .pyclaw_utils import (
     apply_initial_condition,
@@ -49,3 +50,24 @@ def pdesolve_pyclaw(
     t = np.asarray(controller.out_times)
     (x_grid,) = grid_centers_from_state(state)
     return u, t, x_grid
+
+
+## TODO: Generalize to nd
+def solution_to_dataarray(
+    u: Float[Array, "time dim x_grid"],
+    t: Float[Array, " time"],
+    x: Float[Array, " x_grid"],
+    coeffs: dict[str, float],
+) -> xr.DataArray:
+    return xr.DataArray(
+        np.expand_dims(u, axis=0),
+        coords={
+            "t": t,
+            "x": x,
+            "dim": [
+                "u",
+            ],
+            **{coeff: ("sample", [value]) for coeff, value in coeffs.items()},
+        },
+        dims=["sample", "t", "dim", "x"],
+    )
