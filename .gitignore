@@ -15,4 +15,4 @@ temp/
 */pyclaw.log
 
 # Datasets
-data
+data/
