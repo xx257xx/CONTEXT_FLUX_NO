@@ -61,21 +61,25 @@ def pdesolve_pyclaw(
 
 
 ## TODO: Generalize to nd
-def solution_to_dataarray(
+def solution_to_dataset(
     u: Float[Array, "time dim x_grid"],
     t: Float[Array, " time"],
     x: Float[Array, " x_grid"],
     coeffs: dict[str, float],
 ) -> xr.DataArray:
-    return xr.DataArray(
-        np.expand_dims(u, axis=0),
-        coords={
-            "t": t,
-            "x": x,
-            "dim": [
-                "u",
-            ],
-            **{coeff: ("sample", [value]) for coeff, value in coeffs.items()},
+    coeff_names = list(coeffs.keys())
+    coeff_values = np.asarray(list(coeffs.values())).reshape(1, -1)
+
+    coords = {
+        "t": t,
+        "x": x,
+        "dim": ["u"],
+        "param": coeff_names,
+    }
+    return xr.Dataset(
+        {
+            "values": (["sample", "t", "dim", "x"], np.expand_dims(u, axis=0)),
+            "coeffs": (["sample", "param"], coeff_values),
         },
-        dims=["sample", "t", "dim", "x"],
+        coords=coords,
     )

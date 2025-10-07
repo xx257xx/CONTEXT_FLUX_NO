@@ -6,7 +6,7 @@ import numpy as np
 from clawpack import pyclaw
 from jaxtyping import Float
 
-from ..pdesolve import pdesolve_pyclaw
+from ..pdesolve import pdesolve_pyclaw, solution_to_dataset
 
 
 def riemann_cubic_1D(
@@ -81,7 +81,7 @@ class CubicFlux1D(eqx.Module):
         solver.fwave = False
 
         problem_data = {"a": self.a, "b": self.b, "c": self.c}
-        return pdesolve_pyclaw(
+        u, t, x_grid = pdesolve_pyclaw(
             solver,
             problem_data,
             ic_factory,
@@ -92,3 +92,4 @@ class CubicFlux1D(eqx.Module):
             bc,
             **pdesolve_kwargs,
         )
+        return solution_to_dataset(u, t, x_grid, self.coeffs)

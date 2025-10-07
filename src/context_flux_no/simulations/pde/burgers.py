@@ -7,7 +7,7 @@ import xarray as xr
 from clawpack import pyclaw, riemann
 from jaxtyping import Float
 
-from ..pdesolve import pdesolve_pyclaw, solution_to_dataarray
+from ..pdesolve import pdesolve_pyclaw, solution_to_dataset
 
 
 class Burgers1D(eqx.Module):
@@ -45,4 +45,4 @@ class Burgers1D(eqx.Module):
             bc,
             **pdesolve_kwargs,
         )
-        return solution_to_dataarray(u, t, x_grid, self.coeffs)
+        return solution_to_dataset(u, t, x_grid, self.coeffs)
