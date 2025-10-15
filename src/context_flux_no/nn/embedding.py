@@ -49,6 +49,7 @@ class PatchEmbedding(eqx.Module):
     patch_size: tuple[int, int] = eqx.field(static=True)
     in_channels: int = eqx.field(static=True)
     embedding_dim: int = eqx.field(static=True)
+    flat_patch_positions: bool = eqx.field(static=True)
 
     def __init__(
         self,
@@ -56,6 +57,7 @@ class PatchEmbedding(eqx.Module):
         in_channels: int,
         embedding_dim: int,
         *,
+        flat_patch_positions: bool = True,
         key: PRNGKeyArray,
     ):
         if isinstance(patch_size, int):
@@ -69,6 +71,7 @@ class PatchEmbedding(eqx.Module):
         self.in_channels = in_channels
         self.embedding_dim = embedding_dim
         self.patch_size = patch_size
+        self.flat_patch_positions = flat_patch_positions
 
     def compute_padding(
         self, x: Float[Array, "height width in_channels"]
@@ -88,8 +91,14 @@ class PatchEmbedding(eqx.Module):
 
     @named_scope("nn.PatchEmbedding")
     def __call__(
-        self, x: Float[Array, "height width in_channels"]
-    ) -> Float[Array, "num_patches embedding_dim"]:
+        self,
+        x: Float[Array, "height width in_channels"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ) -> (
+        Float[Array, "num_patches embedding_dim"]
+        | Float[Array, "num_patches_row num_patches_col embedding_dim"]
+    ):
         # maybe use jax.ensure_compile_time_eval here?
         padding = self.compute_padding(x)
 
@@ -102,5 +111,8 @@ class PatchEmbedding(eqx.Module):
             padding=padding,
             flatten_patches=True,
         )
-        flat_patches = rearrange(flat_patches, "Ph Pw N -> (Ph Pw) N")
-        return jax.vmap(self.linear)(flat_patches)
+        if self.flat_patch_positions:
+            flat_patches = rearrange(flat_patches, "Ph Pw N -> (Ph Pw) N")
+            return jax.vmap(self.linear)(flat_patches)
+        else:
+            return jax.vmap(jax.vmap(self.linear))(flat_patches)
