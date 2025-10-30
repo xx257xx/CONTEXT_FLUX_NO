@@ -12,6 +12,7 @@ dependencies = [
     "einops>=0.8.1",
     "equinox>=0.12.2",
     "grain>=0.2.10",
+    "h5netcdf>=1.7.3",
     "h5py>=3.14.0",
     "ipykernel>=6.29.5",
     "jax[cuda12]>=0.6.1",
