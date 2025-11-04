@@ -14,10 +14,10 @@ class PDEDataset(eqx.Module):
     since xarray by itself is not compatible with jax.jit, etc.
     """
 
-    u: Float[np.ndarray, "samples Nt dim Nx"]
+    u: Float[np.ndarray, "pde ic Nt dim Nx"]
     t: Float[np.ndarray, " Nt"]
     x: Float[np.ndarray, " Nx"]
-    coeffs: Float[np.ndarray, " samples params"]
+    coeffs: Float[np.ndarray, " pde params"]
     dim_names: list[str] = eqx.field(static=True)
     coeff_names: list[str] = eqx.field(static=True)
 
@@ -36,3 +36,22 @@ class PDEDataset(eqx.Module):
 
     def __getitem__(self, idx) -> tuple[Array, Array]:
         return self.u[idx], self.coeffs[idx]
+
+    @property
+    def num_pde(self) -> int:
+        """Number of distinct PDEs (different coefficient values) contained within the
+        dataset."""
+        return self.u.shape[0]
+
+    @property
+    def num_ic(self) -> int:
+        """Number of distinct initial conditions per PDE contained in the dataset."""
+        return self.u.shape[1]
+
+    @property
+    def dt(self) -> Float[Array, ""]:
+        return self.t[1] - self.t[0]
+
+    @property
+    def dx(self) -> Float[Array, ""]:
+        return self.x[1] - self.x[0]

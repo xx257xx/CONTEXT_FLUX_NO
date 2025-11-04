@@ -8,6 +8,9 @@ from jaxtyping import Array, Complex, Float, PRNGKeyArray
 
 
 class AbstractCovarianceFn(eqx.Module):
+    """See https://www.cs.toronto.edu/~duvenaud/cookbook/ for information on different
+    covariance functions"""
+
     @abc.abstractmethod
     def __call__(self, r: Float[Array, "*shape"]) -> Float[Array, "*shape"]: ...
 
@@ -17,7 +20,7 @@ class ExponentialCov(AbstractCovarianceFn):
     marginal_std: float = eqx.field(static=True, default=1.0)
 
     def __call__(self, r: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
-        return self.marginal_std * jnp.exp(-jnp.abs(r) / self.corr_length)
+        return self.marginal_std**2 * jnp.exp(-jnp.abs(r) / self.corr_length)
 
 
 class GaussianCov(AbstractCovarianceFn):
@@ -25,7 +28,18 @@ class GaussianCov(AbstractCovarianceFn):
     marginal_std: float = eqx.field(static=True, default=1.0)
 
     def __call__(self, r: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
-        return self.marginal_std * jnp.exp(-((r / self.corr_length) ** 2))
+        return self.marginal_std**2 * jnp.exp(-0.5 * (r / self.corr_length) ** 2)
+
+
+class PeriodicCov(AbstractCovarianceFn):
+    corr_length: float = eqx.field(static=True)
+    marginal_std: float = eqx.field(static=True, default=1.0)
+    period: float = eqx.field(static=True, default=1.0)
+
+    def __call__(self, r: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
+        return self.marginal_std * jnp.exp(
+            -2 * (jnp.sin(jnp.pi * r / self.period) / self.corr_length) ** 2
+        )
 
 
 def mce_vector(x: Float[Array, " N"]) -> Float[Array, " 2*N-2"]:

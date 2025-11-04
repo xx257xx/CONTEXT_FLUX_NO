@@ -10,8 +10,7 @@ from .dataset import PDEDataset
 
 
 class SegmentLoader(eqx.Module):
-    """
-    Basic implementation of a SegmentLoader, which is a dedicated class that samples a
+    """Basic implementation of a SegmentLoader, which is a dedicated class that samples a
     given dataset of trajectories  and returns a batch of
     trajectory segments with fixed length.
 
@@ -40,18 +39,20 @@ class SegmentLoader(eqx.Module):
         batch_size = self.batch_strategy.batch_size
         if batch_size is None:
             return self.num_total_segments
-        else:
-            return batch_size
+        return batch_size
 
     @property
     def num_batches(self) -> int | None:
         """Number of batches required to cover (on average) the entire dataset.
 
-        This number is always rounded up to the nearest integer."""
+        This number is always rounded up to the nearest integer.
+        """
         return math.ceil(self.num_total_segments / self.batch_size)
 
     def get_segments(
-        self, traj_idx: Int[Array, " batch_size"], time_idx: Int[Array, " batch_size"]
+        self,
+        traj_idx: Int[Array, " batch_size"],
+        time_idx: Int[Array, " batch_size"],
     ) -> tuple[
         Float[Array, "batch_size segment_len dim x"],
         Float[Array, "batch_size segment_len"],
@@ -61,17 +62,25 @@ class SegmentLoader(eqx.Module):
         @eqx.filter_vmap
         def _get_segments(sample_idx, time_idx):
             t_segment = jax.lax.dynamic_slice_in_dim(
-                self.dataset.t, time_idx, self.segment_length
+                self.dataset.t,
+                time_idx,
+                self.segment_length,
             )
             coeff_segment = jax.lax.dynamic_index_in_dim(
-                self.dataset.coeffs, sample_idx, keepdims=False
+                self.dataset.coeffs,
+                sample_idx,
+                keepdims=False,
             )
 
             u_segment = jax.lax.dynamic_index_in_dim(
-                self.dataset.u, sample_idx, keepdims=False
+                self.dataset.u,
+                sample_idx,
+                keepdims=False,
             )
             u_segment = jax.lax.dynamic_slice_in_dim(
-                u_segment, time_idx, self.segment_length
+                u_segment,
+                time_idx,
+                self.segment_length,
             )
             return (
                 u_segment,
@@ -83,18 +92,17 @@ class SegmentLoader(eqx.Module):
         return _get_segments(traj_idx, time_idx)
 
     def linear_to_sample_indices(
-        self, linear_indices: Int[Array, " {self.batch_size}"]
+        self,
+        linear_indices: Int[Array, " {self.batch_size}"],
     ) -> tuple[Int[Array, " {self.batch_size}"], Int[Array, " {self.batch_size}"]]:
-        """
-        Converts the 1D array of linear indices representing the starting position of
+        """Converts the 1D array of linear indices representing the starting position of
         the segments in the batch to a tuple of indices that can be used to locate the
         said position in `self.dataset.u`.
         """
         return jnp.divmod(linear_indices, self.num_segments_per_traj)
 
     def init(self) -> PyTree:
-        """
-        Returns the initial loader_state to be fed into the first call of
+        """Returns the initial loader_state to be fed into the first call of
         `self.load_batch`.
 
         This is inspired by optax's optimizer.init function.
@@ -103,8 +111,7 @@ class SegmentLoader(eqx.Module):
         return (batch_state_init,)
 
     def load_batch(self, loader_state: PyTree) -> tuple[PyTree[Array], PyTree]:
-        """
-        Main logic to load a single batch of time series data segments.
+        """Main logic to load a single batch of time series data segments.
 
         loader_state contains any extra state necessary to generate a particular batch:
         For random sampling, this corresponds to the random key, and for minibatch
@@ -113,7 +120,7 @@ class SegmentLoader(eqx.Module):
         """
         (batch_state,) = loader_state
         linear_indices, batch_state_next = self.batch_strategy.generate_batch(
-            batch_state
+            batch_state,
         )
         batch = self.get_segments(*self.linear_to_sample_indices(linear_indices))
         loader_state_next = (batch_state_next,)

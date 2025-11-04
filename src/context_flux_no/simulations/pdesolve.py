@@ -68,7 +68,7 @@ def solution_to_dataset(
     coeffs: dict[str, float],
 ) -> xr.DataArray:
     coeff_names = list(coeffs.keys())
-    coeff_values = np.asarray(list(coeffs.values())).reshape(1, -1)
+    coeff_values = np.asarray(list(coeffs.values()))
 
     coords = {
         "t": t,
@@ -78,8 +78,8 @@ def solution_to_dataset(
     }
     return xr.Dataset(
         {
-            "values": (["sample", "t", "dim", "x"], np.expand_dims(u, axis=0)),
-            "coeffs": (["sample", "param"], coeff_values),
+            "values": (["ic", "t", "dim", "x"], np.expand_dims(u, axis=0)),
+            "coeffs": (["param"], coeff_values),
         },
         coords=coords,
     )
