@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Self
 
 import equinox as eqx
@@ -55,3 +56,15 @@ class PDEDataset(eqx.Module):
     @property
     def dx(self) -> Float[Array, ""]:
         return self.x[1] - self.x[0]
+
+    def split_by_time(self, time_idx: int) -> tuple[Self, Self]:
+        """Split the dataset into two along the time axis at the given index value.
+        Useful for creating training and extrapolation datasets."""
+        u1, u2 = self.u[:, :, :time_idx], self.u[:, :, time_idx:]
+        t1, t2 = self.t[:time_idx], self.t[time_idx:]
+        return replace(self, u=u1, t=t1), replace(self, u=u2, t=t2)
+
+    def downsample(self, downsample_factor: int) -> Self:
+        u = self.u[:, :, ::downsample_factor]
+        t = self.t[::downsample_factor]
+        return replace(self, u=u, t=t)
