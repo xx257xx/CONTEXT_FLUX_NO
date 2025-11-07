@@ -16,3 +16,7 @@ temp/
 
 # Datasets
 data/
+
+# Hydra artifacts
+multirun/
+outputs/
