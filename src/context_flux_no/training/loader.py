@@ -10,9 +10,9 @@ from .dataset import PDEDataset
 
 
 class SegmentLoader(eqx.Module):
-    """Basic implementation of a SegmentLoader, which is a dedicated class that samples a
-    given dataset of trajectories  and returns a batch of
-    trajectory segments with fixed length.
+    """Basic implementation of a SegmentLoader, which is a dedicated class that samples
+    a given dataset of trajectories  and returns a batch of trajectory segments with
+    fixed length.
 
     This class inspired by DataLoader classes in many deep learning libraries, such as
     `torch.utils.data.DataLoader`.

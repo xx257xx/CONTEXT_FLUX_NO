@@ -64,7 +64,7 @@ class PDEDataset(eqx.Module):
         t1, t2 = self.t[:time_idx], self.t[time_idx:]
         return replace(self, u=u1, t=t1), replace(self, u=u2, t=t2)
 
-    def downsample(self, downsample_factor: int) -> Self:
+    def downsample_time(self, downsample_factor: int) -> Self:
         u = self.u[:, :, ::downsample_factor]
         t = self.t[::downsample_factor]
         return replace(self, u=u, t=t)

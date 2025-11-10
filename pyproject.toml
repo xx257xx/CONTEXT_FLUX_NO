@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "clawpack>=5.12.0",
+    "dask[distributed]>=2025.11.0",
     "einops>=0.8.1",
     "equinox>=0.12.2",
     "grain>=0.2.10",
@@ -20,8 +21,10 @@ dependencies = [
     "jax[cuda12]>=0.6.1",
     "jaxtyping>=0.3.2",
     "matplotlib>=3.10.3",
+    "netcdf4>=1.7.3",
     "numpy>=2.3.0",
     "optax>=0.2.5",
+    "orbax-checkpoint==0.11.25",
     "scipy>=1.15.3",
     "tqdm>=4.67.1",
     "wandb>=0.22.3",

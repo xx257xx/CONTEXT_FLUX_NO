@@ -1,0 +1,15 @@
+defaults:
+- data: cubicflux_1d
+- model: hyperfluxfno
+- training: default
+- override hydra/launcher: submitit_slurm
+- _self_
+
+wandb:
+  entity: jhko725
+  project: hyperfluxfno
+hydra:
+  launcher: 
+    timeout_min: 2400
+    tasks_per_node: 1
+    gpus_per_node: 1

@@ -20,3 +20,9 @@ data/
 # Hydra artifacts
 multirun/
 outputs/
+
+# Wandb logs
+wandb/
+
+# Checkpoints
+checkpoints/
