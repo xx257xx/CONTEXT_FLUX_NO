@@ -99,7 +99,7 @@ class HyperFourier(eqx.Module):
             width_size=hyper_width,
             depth=hyper_depth,
             activation=activation,
-            dtype = dtype,
+            dtype=dtype,
             key=w2key,
         )
 
