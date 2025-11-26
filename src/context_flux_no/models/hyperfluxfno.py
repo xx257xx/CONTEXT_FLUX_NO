@@ -8,7 +8,7 @@ from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from ..nn import PatchEmbedding, TransformerEncoderBlock
-from ..nn.hypernetworks import HyperFourier
+from ..nn.hypernetworks import HyperFourier, HyperLinear
 from ..nn.positional_encoding import SineCosinePosEncoding2D
 
 
@@ -88,9 +88,9 @@ class ViTContextModule(eqx.Module):
 
 class ViTContextHyperFluxFNO(eqx.Module):
     context_module: ViTContextModule
-    lift_layer: eqx.nn.MLP
+    hyperlift_layers: list[HyperLinear]
     hyperfourier_layers: list[HyperFourier]
-    project_layer: eqx.nn.MLP
+    hyperproject_layers: list[HyperLinear]
     film_net: eqx.nn.Linear
 
     lift_dim: int = eqx.field(static=True)
@@ -98,6 +98,7 @@ class ViTContextHyperFluxFNO(eqx.Module):
     stencil_size: tuple[int, int] = eqx.field(static=True)
     boundary_condition: Literal["periodic"] = eqx.field(static=True)
     stack_grid: bool = eqx.field(static=True)
+    activation: Callable = eqx.field(static=True)
 
     def __init__(
         self,
@@ -132,18 +133,31 @@ class ViTContextHyperFluxFNO(eqx.Module):
         )
         self.boundary_condition = boundary_condition
 
-        keys = jax.random.split(key, 4 + depth)
+        keys = jax.random.split(key, 6 + depth)
 
         input_dim = data_dim * (self.stencil_size[0] + self.stencil_size[1] + 1)
-        self.lift_layer = eqx.nn.MLP(
-            input_dim + 1 if stack_grid else input_dim,
-            lift_dim,
-            width_lift,
-            depth_lift,
-            activation,
-            dtype=dtype,
-            key=keys[0],
-        )
+        self.hyperlift_layers = [
+            HyperLinear(
+                in_features=input_dim + 1 if stack_grid else input_dim,
+                out_features=width_lift,
+                hyper_in_dims=context_embed_dim,
+                hyper_depth=depth_hyper,
+                hyper_width=width_hyper,
+                activation=activation,
+                dtype=dtype,
+                key=keys[0],
+            ),
+            HyperLinear(
+                in_features=width_lift,
+                out_features=lift_dim,
+                hyper_in_dims=context_embed_dim,
+                hyper_depth=depth_hyper,
+                hyper_width=width_hyper,
+                activation=activation,
+                dtype=dtype,
+                key=keys[1],
+            ),
+        ]
 
         self.context_module = ViTContextModule(
             patch_size=patch_size,
@@ -153,7 +167,7 @@ class ViTContextHyperFluxFNO(eqx.Module):
             num_heads=vit_heads,
             num_layers=depth_vit,
             dropout=dropout,
-            key=keys[1],
+            key=keys[2],
         )
         self.hyperfourier_layers = [
             HyperFourier(
@@ -168,24 +182,38 @@ class ViTContextHyperFluxFNO(eqx.Module):
                 dtype=dtype,
                 key=k,
             )
-            for k in keys[2 : 2 + depth]
+            for k in keys[3 : 3 + depth]
         ]
 
-        self.project_layer = eqx.nn.MLP(
-            lift_dim,
-            data_dim,
-            width_project,
-            depth_project,
-            activation,
-            dtype=dtype,
-            key=keys[-2],
-        )
+        self.hyperproject_layers = [
+            HyperLinear(
+                in_features=lift_dim,
+                out_features=width_project,
+                hyper_in_dims=context_embed_dim,
+                hyper_depth=depth_hyper,
+                hyper_width=width_hyper,
+                activation=activation,
+                dtype=dtype,
+                key=keys[-3],
+            ),
+            HyperLinear(
+                in_features=width_project,
+                out_features=data_dim,
+                hyper_in_dims=context_embed_dim,
+                hyper_depth=depth_hyper,
+                hyper_width=width_hyper,
+                activation=activation,
+                dtype=dtype,
+                key=keys[-2],
+            ),
+        ]
 
         self.film_net = eqx.nn.Linear(context_embed_dim, 2 * lift_dim, key=keys[-1])
 
         self.stack_grid = stack_grid
         self.lift_dim = lift_dim
         self.context_embed_dim = context_embed_dim
+        self.activation = activation
 
     def create_stencil_axis(
         self,
@@ -207,6 +235,22 @@ class ViTContextHyperFluxFNO(eqx.Module):
             axis=-1,
         )
 
+    def lift_layer(
+        self, v: Float[Array, " input_dim"], context_vec: Float[Array, " embedding_dim"]
+    ) -> Float[Array, " lift_dim"]:
+        v = self.hyperlift_layers[0](v, context_vec)
+        v = self.activation(v)
+        v = self.hyperlift_layers[1](v, context_vec)
+        return v
+
+    def project_layer(
+        self, v: Float[Array, " lift_dim"], context_vec: Float[Array, " embedding_dim"]
+    ) -> Float[Array, " data_dim"]:
+        v = self.hyperproject_layers[0](v, context_vec)
+        v = self.activation(v)
+        v = self.hyperproject_layers[1](v, context_vec)
+        return v
+
     def flux_model(
         self,
         v_stencil: Float[Array, "dim_stencil x"],
@@ -218,18 +262,21 @@ class ViTContextHyperFluxFNO(eqx.Module):
             grid = jnp.expand_dims(jnp.linspace(0, 1, v_stencil.shape[-1]), axis=0)
             v_stencil = jnp.concatenate((v_stencil, grid), axis=0)
 
-        gamma, beta = film_weights[: self.lift_dim], film_weights[self.lift_dim :]
+        # gamma, beta = film_weights[: self.lift_dim], film_weights[self.lift_dim :]
+        gamma, beta = 1.0, 0.0
 
         v: Float[Array, "lift_dim x"] = eqx.filter_vmap(
             self.lift_layer,
-            in_axes=-1,
+            in_axes=(-1, None),
             out_axes=-1,
-        )(v_stencil)
+        )(v_stencil, context_vec)
 
         for hyperfourier in self.hyperfourier_layers:
             v = v + gamma * hyperfourier(v, context_vec) + beta
 
-        v = eqx.filter_vmap(self.project_layer, in_axes=-1, out_axes=-1)(v)
+        v = eqx.filter_vmap(self.project_layer, in_axes=(-1, None), out_axes=-1)(
+            v, context_vec
+        )
         return v
 
     def __call__(
@@ -246,22 +293,22 @@ class ViTContextHyperFluxFNO(eqx.Module):
             key=key,
         )
 
-        context_patches_x: Float[Array, "patches_x embedding_dim"] = jnp.mean(
-            context_patches,
-            axis=0,
-        )
-        film_weights: Float[Array, "2*lift_dim patches_x"] = jax.vmap(
-            self.film_net,
-            in_axes=0,
-            out_axes=1,
-        )(context_patches_x)
+        # context_patches_x: Float[Array, "patches_x embedding_dim"] = jnp.mean(
+        #     context_patches,
+        #     axis=0,
+        # )
+        # film_weights: Float[Array, "2*lift_dim patches_x"] = jax.vmap(
+        #     self.film_net,
+        #     in_axes=0,
+        #     out_axes=1,
+        # )(context_patches_x)
 
-        film_weights: Float[Array, "2*lift_dim x"] = jax.image.resize(
-            film_weights,
-            (film_weights.shape[0], v.shape[1]),
-            method="nearest",
-        )
-
+        # film_weights: Float[Array, "2*lift_dim x"] = jax.image.resize(
+        #     film_weights,
+        #     (film_weights.shape[0], v.shape[1]),
+        #     method="nearest",
+        # )
+        film_weights = None
         v_stencil: Float[
             Array,
             "dim {self.stencil_size[0]}+{self.stencil_size[1]}+2 x",

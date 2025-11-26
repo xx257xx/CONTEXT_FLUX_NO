@@ -47,6 +47,8 @@ class HyperLinear(eqx.Module):
             key=key,
         )
 
+        self.use_bias = use_bias
+
     def __call__(
         self,
         v: Float[Array, " in_features"],
