@@ -31,8 +31,6 @@ class HyperFourier(eqx.Module):
     linear_weight_shape: tuple[int, ...] = eqx.field(static=True)
     linear_bias_shape: tuple[int, ...] = eqx.field(static=True)
     hyper_in_dims: int = eqx.field(static=True)
-    hyper_width: int = eqx.field(static=True)
-    hyper_depth: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -41,8 +39,6 @@ class HyperFourier(eqx.Module):
         out_channels: int,
         frequency_modes: int | Sequence[int],
         hyper_in_dims: int,
-        hyper_depth: int,
-        hyper_width: int,
         activation: Callable = jax.nn.gelu,
         dtype=None,
         *,
@@ -78,12 +74,9 @@ class HyperFourier(eqx.Module):
             *[2 * i for i in frequency_modes[:-1]],
             frequency_modes[-1],
         )
-        self.fourier_weight_net = eqx.nn.MLP(
-            in_size=hyper_in_dims,
-            out_size=prod(self.fourier_weight_shape),
-            width_size=hyper_width,
-            depth=hyper_depth,
-            activation=activation,
+        self.fourier_weight_net = eqx.nn.Linear(
+            in_feature=hyper_in_dims,
+            out_features=prod(self.fourier_weight_shape),
             dtype=to_complex_dtype(dtype),
             key=w1key,
         )
@@ -93,12 +86,9 @@ class HyperFourier(eqx.Module):
             in_channels,
         ) + (1,) * num_spatial_dims
         self.linear_bias_shape = (out_channels,) + (1,) * num_spatial_dims
-        self.linear_weight_net = eqx.nn.MLP(
+        self.linear_weight_net = eqx.nn.Linear(
             in_size=hyper_in_dims,
             out_size=prod(self.linear_weight_shape) + prod(self.linear_bias_shape),
-            width_size=hyper_width,
-            depth=hyper_depth,
-            activation=activation,
             dtype=dtype,
             key=w2key,
         )
@@ -109,8 +99,6 @@ class HyperFourier(eqx.Module):
         self.out_channels = out_channels
         self.frequency_modes = frequency_modes
         self.hyper_in_dims = hyper_in_dims
-        self.hyper_width = hyper_width
-        self.hyper_depth = hyper_depth
 
     def spectral_conv(
         self,
