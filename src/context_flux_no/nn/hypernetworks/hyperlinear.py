@@ -1,8 +1,6 @@
-from collections.abc import Callable
 from math import prod
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
 from equinox._misc import default_floating_dtype
 from jaxtyping import Array, Float, PRNGKeyArray
@@ -19,9 +17,6 @@ class HyperLinear(eqx.Module):
         in_features: int,
         out_features: int,
         hyper_in_dims: int,
-        hyper_depth: int,
-        hyper_width: int,
-        activation: Callable = jax.nn.gelu,
         use_bias: bool = True,
         dtype=None,
         *,
@@ -37,12 +32,9 @@ class HyperLinear(eqx.Module):
             if use_bias
             else prod(self.weight_shape)
         )
-        self.weight_net = eqx.nn.MLP(
-            in_size=hyper_in_dims,
-            out_size=out_size,
-            width_size=hyper_width,
-            depth=hyper_depth,
-            activation=activation,
+        self.weight_net = eqx.nn.Linear(
+            in_features=hyper_in_dims,
+            out_features=out_size,
             dtype=dtype,
             key=key,
         )
