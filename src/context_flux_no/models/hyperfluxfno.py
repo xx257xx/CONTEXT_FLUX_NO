@@ -88,6 +88,7 @@ class ViTContextModule(eqx.Module):
 
 class ViTContextHyperFluxFNO(eqx.Module):
     context_module: ViTContextModule
+    hypernetwork_trunk: eqx.nn.MLP
     hyperlift_layers: list[HyperLinear]
     hyperfourier_layers: list[HyperFourier]
     hyperproject_layers: list[HyperLinear]
@@ -133,29 +134,31 @@ class ViTContextHyperFluxFNO(eqx.Module):
         )
         self.boundary_condition = boundary_condition
 
-        keys = jax.random.split(key, 6 + depth)
+        keys = jax.random.split(key, 7 + depth)
 
         input_dim = data_dim * (self.stencil_size[0] + self.stencil_size[1] + 1)
+        self.hypernetwork_trunk = eqx.nn.MLP(
+            in_size=context_embed_dim,
+            out_size=context_embed_dim,
+            width_size=width_hyper,
+            depth=depth_hyper,
+            activation=activation,
+            key=keys[0],
+        )
         self.hyperlift_layers = [
             HyperLinear(
                 in_features=input_dim + 1 if stack_grid else input_dim,
                 out_features=width_lift,
                 hyper_in_dims=context_embed_dim,
-                hyper_depth=depth_hyper,
-                hyper_width=width_hyper,
-                activation=activation,
                 dtype=dtype,
-                key=keys[0],
+                key=keys[1],
             ),
             HyperLinear(
                 in_features=width_lift,
                 out_features=lift_dim,
                 hyper_in_dims=context_embed_dim,
-                hyper_depth=depth_hyper,
-                hyper_width=width_hyper,
-                activation=activation,
                 dtype=dtype,
-                key=keys[1],
+                key=keys[2],
             ),
         ]
 
@@ -167,7 +170,7 @@ class ViTContextHyperFluxFNO(eqx.Module):
             num_heads=vit_heads,
             num_layers=depth_vit,
             dropout=dropout,
-            key=keys[2],
+            key=keys[3],
         )
         self.hyperfourier_layers = [
             HyperFourier(
@@ -176,13 +179,11 @@ class ViTContextHyperFluxFNO(eqx.Module):
                 out_channels=lift_dim,
                 frequency_modes=frequency_modes,
                 hyper_in_dims=context_embed_dim,
-                hyper_width=width_hyper,
-                hyper_depth=depth_hyper,
                 activation=activation,
                 dtype=dtype,
                 key=k,
             )
-            for k in keys[3 : 3 + depth]
+            for k in keys[4 : 4 + depth]
         ]
 
         self.hyperproject_layers = [
@@ -190,9 +191,6 @@ class ViTContextHyperFluxFNO(eqx.Module):
                 in_features=lift_dim,
                 out_features=width_project,
                 hyper_in_dims=context_embed_dim,
-                hyper_depth=depth_hyper,
-                hyper_width=width_hyper,
-                activation=activation,
                 dtype=dtype,
                 key=keys[-3],
             ),
@@ -200,9 +198,6 @@ class ViTContextHyperFluxFNO(eqx.Module):
                 in_features=width_project,
                 out_features=data_dim,
                 hyper_in_dims=context_embed_dim,
-                hyper_depth=depth_hyper,
-                hyper_width=width_hyper,
-                activation=activation,
                 dtype=dtype,
                 key=keys[-2],
             ),
@@ -292,7 +287,7 @@ class ViTContextHyperFluxFNO(eqx.Module):
             rearrange(context, "t d x -> t x d"),
             key=key,
         )
-
+        context_embed = self.hypernetwork_trunk(context_embed)
         # context_patches_x: Float[Array, "patches_x embedding_dim"] = jnp.mean(
         #     context_patches,
         #     axis=0,

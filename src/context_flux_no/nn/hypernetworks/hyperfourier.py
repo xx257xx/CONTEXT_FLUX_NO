@@ -75,7 +75,7 @@ class HyperFourier(eqx.Module):
             frequency_modes[-1],
         )
         self.fourier_weight_net = eqx.nn.Linear(
-            in_feature=hyper_in_dims,
+            in_features=hyper_in_dims,
             out_features=prod(self.fourier_weight_shape),
             dtype=to_complex_dtype(dtype),
             key=w1key,
@@ -87,8 +87,8 @@ class HyperFourier(eqx.Module):
         ) + (1,) * num_spatial_dims
         self.linear_bias_shape = (out_channels,) + (1,) * num_spatial_dims
         self.linear_weight_net = eqx.nn.Linear(
-            in_size=hyper_in_dims,
-            out_size=prod(self.linear_weight_shape) + prod(self.linear_bias_shape),
+            in_features=hyper_in_dims,
+            out_features=prod(self.linear_weight_shape) + prod(self.linear_bias_shape),
             dtype=dtype,
             key=w2key,
         )
