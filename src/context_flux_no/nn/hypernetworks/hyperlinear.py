@@ -48,7 +48,8 @@ class HyperLinear(eqx.Module):
         *,
         key: PRNGKeyArray | None = None,
     ) -> Float[Array, " out_features"]:
-        params_flat = self.weight_net(hyper_input)
+        # tanh added to constrain weight range
+        params_flat = jnp.tanh(self.weight_net(hyper_input))
         weight = jnp.reshape(params_flat[: prod(self.weight_shape)], self.weight_shape)
         v = weight @ v
         if self.use_bias:

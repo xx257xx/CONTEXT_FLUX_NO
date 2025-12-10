@@ -257,8 +257,8 @@ class ViTContextHyperFluxFNO(eqx.Module):
             grid = jnp.expand_dims(jnp.linspace(0, 1, v_stencil.shape[-1]), axis=0)
             v_stencil = jnp.concatenate((v_stencil, grid), axis=0)
 
-        # gamma, beta = film_weights[: self.lift_dim], film_weights[self.lift_dim :]
-        gamma, beta = 1.0, 0.0
+        gamma, beta = film_weights[: self.lift_dim], film_weights[self.lift_dim :]
+        # gamma, beta = 1.0, 0.0
 
         v: Float[Array, "lift_dim x"] = eqx.filter_vmap(
             self.lift_layer,
@@ -288,22 +288,22 @@ class ViTContextHyperFluxFNO(eqx.Module):
             key=key,
         )
         context_embed = self.hypernetwork_trunk(context_embed)
-        # context_patches_x: Float[Array, "patches_x embedding_dim"] = jnp.mean(
-        #     context_patches,
-        #     axis=0,
-        # )
-        # film_weights: Float[Array, "2*lift_dim patches_x"] = jax.vmap(
-        #     self.film_net,
-        #     in_axes=0,
-        #     out_axes=1,
-        # )(context_patches_x)
+        context_patches_x: Float[Array, "patches_x embedding_dim"] = jnp.mean(
+            context_patches,
+            axis=0,
+        )
+        film_weights: Float[Array, "2*lift_dim patches_x"] = jax.vmap(
+            self.film_net,
+            in_axes=0,
+            out_axes=1,
+        )(context_patches_x)
 
-        # film_weights: Float[Array, "2*lift_dim x"] = jax.image.resize(
-        #     film_weights,
-        #     (film_weights.shape[0], v.shape[1]),
-        #     method="nearest",
-        # )
-        film_weights = None
+        film_weights: Float[Array, "2*lift_dim x"] = jax.image.resize(
+            film_weights,
+            (film_weights.shape[0], v.shape[1]),
+            method="nearest",
+        )
+        # film_weights = None
         v_stencil: Float[
             Array,
             "dim {self.stencil_size[0]}+{self.stencil_size[1]}+2 x",
