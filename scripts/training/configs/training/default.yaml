@@ -15,4 +15,4 @@ optimizer:
     decay_steps: 45000
     end_value: 0.0
 checkpoint_dir: ./checkpoints
-checkpoint_name: ${..data.name}_lr=${.optimizer.learning_rate}
+checkpoint_name: ${..data.name}_lr=${.optimizer.learning_rate}_nofilm

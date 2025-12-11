@@ -180,12 +180,11 @@ class HyperFourier(eqx.Module):
         component corresponding to each input channel is linearly mixed to produce the
         spectral components of the output channels.
         """
-        # tanh added to constrain weight range
         fourier_weights = jnp.reshape(
-            jnp.tanh(self.fourier_weight_net(hyper_input)),
+            self.fourier_weight_net(hyper_input),
             self.fourier_weight_shape,
         )
-        linear_params_flat = jnp.tanh(self.linear_weight_net(hyper_input))
+        linear_params_flat = self.linear_weight_net(hyper_input)
         linear_weight = jnp.reshape(
             linear_params_flat[: prod(self.linear_weight_shape)],
             self.linear_weight_shape,
