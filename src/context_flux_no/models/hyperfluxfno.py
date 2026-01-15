@@ -7,11 +7,13 @@ import jax.numpy as jnp
 from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from ..nn import PatchEmbedding, TransformerEncoderBlock
+from ..nn import TransformerEncoderBlock
+from ..nn.embedding_old import PatchEmbedding
 from ..nn.hypernetworks import HyperFourier, HyperLinear
 from ..nn.positional_encoding import SineCosinePosEncoding2D
 
 
+# TODO: replace PatchEmbedding with the new implementation
 class ViTContextModule(eqx.Module):
     patch_embedding: PatchEmbedding
     positional_encoding: SineCosinePosEncoding2D

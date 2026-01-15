@@ -53,3 +53,8 @@ select = ["E", "F", "I001"]
 combine-as-imports = true
 lines-after-imports = 2
 order-by-type = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

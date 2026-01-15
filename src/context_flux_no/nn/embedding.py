@@ -1,118 +1,136 @@
+from collections.abc import Callable, Sequence
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from einops import rearrange
 from equinox.nn._misc import named_scope
 from jaxtyping import Array, Float, PRNGKeyArray
 
-
-def unfold(
-    x: Float[Array, "H W C"],
-    kernel_size: tuple[int, int],
-    stride: tuple[int, int],
-    padding: list[tuple[int, int]] | str = "valid",
-    *,
-    flatten_patches: bool = True,
-) -> Float[Array, "Ph Pw C*h*w"] | Float[Array, "Ph Pw C h w"]:
-    """JAX version of torch.nn.functional.unfold, which extracts
-    sliding local blocks from a given tensor
-
-    If flatten_patches is True, each extracted patch will be a 1D tensor of shape
-    (C*h*w); if flatten_patches is False, each patch
-    will have shape (C, h, w).
-
-    Here, h and w correspond to height and widths of the kernel."""
-
-    patches = jax.lax.conv_general_dilated_patches(
-        jnp.expand_dims(x, axis=0),
-        kernel_size,
-        stride,
-        padding=padding,
-        dimension_numbers=("NHWC", "HWIO", "NHWC"),
-    )[0]
-    if not flatten_patches:
-        h, w = kernel_size
-        patches = rearrange(patches, "Ph Pw (C h w) -> Ph Pw C h w", h=h, w=w)
-    return patches
+from .misc import to_ntuple
 
 
 class PatchEmbedding(eqx.Module):
-    """
-    Patch embedding layer for the vision transformer model, inspired by
-    - Eqxvision PatchEmbed class:
-        https://github.com/paganpasta/eqxvision/blob/main/eqxvision/layers/patch_embed.py#L11
-    - Vision Transformer example in equinox:
-        https://docs.kidger.site/equinox/examples/vision_transformer/
-    """
+    layers: tuple[eqx.nn.Conv, ...]
 
-    linear: eqx.nn.Linear
-    patch_size: tuple[int, int] = eqx.field(static=True)
-    in_channels: int = eqx.field(static=True)
+    num_spatial_dims: int = eqx.field(static=True)
+    patch_size: tuple[int] = eqx.field(static=True)
+    in_dim: int = eqx.field(static=True)
     embedding_dim: int = eqx.field(static=True)
-    flat_patch_positions: bool = eqx.field(static=True)
+    activation: Callable = eqx.field(static=True)
+    final_activation: Callable = eqx.field(static=True)
 
     def __init__(
         self,
-        patch_size: tuple[int, int] | int,
-        in_channels: int,
+        num_spatial_dims: int,
+        patch_size: int | Sequence[int],
+        in_dim: int,
         embedding_dim: int,
+        num_hidden: int = 0,
+        hidden_dim: int = 32,
+        activation: Callable = jax.nn.gelu,
+        final_activation: Callable = lambda x: x,
+        dtype=None,
         *,
-        flat_patch_positions: bool = True,
         key: PRNGKeyArray,
     ):
-        if isinstance(patch_size, int):
-            patch_size = (patch_size, patch_size)
-
-        self.linear = eqx.nn.Linear(
-            in_features=in_channels * patch_size[0] * patch_size[1],
-            out_features=embedding_dim,
-            key=key,
-        )
-        self.in_channels = in_channels
-        self.embedding_dim = embedding_dim
+        patch_size = to_ntuple(patch_size, num_spatial_dims)
+        if num_patch_dims := len(patch_size) != num_spatial_dims:
+            raise ValueError(
+                f"""Given num_spatial_dims is incompatible with that of patch_size.
+                Got {num_spatial_dims=} but patch_size has spatial dimensions 
+                {num_patch_dims}"""
+            )
         self.patch_size = patch_size
-        self.flat_patch_positions = flat_patch_positions
 
-    def compute_padding(
-        self, x: Float[Array, "height width in_channels"]
-    ) -> tuple[tuple[int, int], tuple[int, int]]:
-        """Compute the amount of padding required to make the image width/height
-        integer multiples of patch width/height.
+        # Largely inspired by the implementation of `equinox.nn.MLP`
+        # https://github.com/patrick-kidger/equinox/blob/main/equinox/nn/_mlp.py#L88-L107
+        keys = jax.random.split(key, num_hidden + 1)
+        layers = []
+        if num_hidden == 0:
+            layers.append(
+                eqx.nn.Conv(
+                    num_spatial_dims,
+                    in_dim,
+                    embedding_dim,
+                    self.patch_size,
+                    self.patch_size,
+                    dtype=dtype,
+                    key=keys[0],
+                )
+            )
+        else:
+            layers.append(
+                eqx.nn.Conv(
+                    num_spatial_dims,
+                    in_dim,
+                    hidden_dim,
+                    self.patch_size,
+                    self.patch_size,
+                    dtype=dtype,
+                    key=keys[0],
+                )
+            )
+            for i in range(num_hidden - 1):
+                layers.append(
+                    eqx.nn.Conv(
+                        num_spatial_dims,
+                        hidden_dim,
+                        hidden_dim,
+                        1,
+                        1,
+                        dtype=dtype,
+                        key=keys[i],
+                    )
+                )
+            layers.append(
+                eqx.nn.Conv(
+                    num_spatial_dims,
+                    hidden_dim,
+                    embedding_dim,
+                    1,
+                    1,
+                    dtype=dtype,
+                    key=keys[-1],
+                )
+            )
+        self.layers = tuple(layers)
+        self.num_spatial_dims = num_spatial_dims
+        self.in_dim = in_dim
+        self.embedding_dim = embedding_dim
+        self.activation = activation
+        self.final_activation = final_activation
 
-        The padding is applied at the right and bottom of the image"""
-        img_height, img_width, _ = x.shape
-        patch_height, patch_width = self.patch_size
-        pad_h = img_height % patch_height
-        pad_w = img_width % patch_width
+    def maybe_pad(
+        self, x: Float[Array, " in_dim *grids"]
+    ) -> Float[Array, " in_dim *grids_padded"]:
+        """Given an array x, zero pad it at the end if necessary to make the image size
+        an integer multiple of self.patch_size.
 
-        pad_h = 0 if pad_h == 0 else patch_height - pad_h
-        pad_w = 0 if pad_w == 0 else patch_width - pad_w
-        return ((0, pad_h), (0, pad_w))
+        Under jax.jit, this function should be compiled down to identity if no padding
+        is needed; otherwise, it will become a single call to jax.numpy.pad."""
+        # Compute pad widths and whether to pad
+        with jax.ensure_compile_time_eval():
+            pad_after = tuple(
+                p - s % p if s % p != 0 else 0
+                for (s, p) in zip(x.shape[1:], self.patch_size)
+            )
+            should_pad = any(s != 0 for s in pad_after)
+        # Conditional evaluated during compile time
+        if should_pad:
+            pad_widths = [(0, 0)] + [(0, p) for p in pad_after]
+            return jnp.pad(x, pad_widths)
+        else:
+            return x
 
     @named_scope("nn.PatchEmbedding")
     def __call__(
-        self,
-        x: Float[Array, "height width in_channels"],
-        *,
-        key: PRNGKeyArray | None = None,
-    ) -> (
-        Float[Array, "num_patches embedding_dim"]
-        | Float[Array, "num_patches_row num_patches_col embedding_dim"]
-    ):
-        # maybe use jax.ensure_compile_time_eval here?
-        padding = self.compute_padding(x)
+        self, x: Float[Array, " in_dim *grids"], *, key: PRNGKeyArray | None = None
+    ) -> Float[Array, " embedding_dim *grids_patch"]:
+        assert all(
+            s % p == 0 for (s, p) in zip(x.shape[1:], self.patch_size)
+        ), """Image shape mult be integer multiple of self.patch_size. 
+        If not, call PatchEmbedding.maybe_pad first to pad the image to proper shape."""
 
-        flat_patches: Float[
-            Array, "num_patches_h num_patches_w in_channels*patch_h*patch_w"
-        ] = unfold(
-            x,
-            kernel_size=self.patch_size,
-            stride=self.patch_size,
-            padding=padding,
-            flatten_patches=True,
-        )
-        if self.flat_patch_positions:
-            flat_patches = rearrange(flat_patches, "Ph Pw N -> (Ph Pw) N")
-            return jax.vmap(self.linear)(flat_patches)
-        else:
-            return jax.vmap(jax.vmap(self.linear))(flat_patches)
+        for layer in self.layers[:-1]:
+            x = self.activation(layer(x))
+        return self.final_activation(self.layers[-1](x))
