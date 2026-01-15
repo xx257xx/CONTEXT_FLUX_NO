@@ -94,6 +94,7 @@ class SpectralConv(eqx.Module):
         spectral components of the output channels.
         """
         n_grids = v.shape[1:]
+        # TODO: rfftn axes argument seems wrong: should verify
         v_fft: Complex[Array, "in_channels grids"] = jnp.fft.rfftn(v, axes=(-1,))
         v_fft_trunc = v_fft[:, *self.frequency_mask(n_grids)]
         out_fft_trunc: Complex[Array, "out_channels frequency_modes"] = jnp.einsum(

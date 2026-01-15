@@ -1,8 +1,10 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import repeat
 from typing import TypeVar
 
+import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Complex
 
 
 def to_complex_dtype(dtype):
@@ -29,3 +31,21 @@ def to_ntuple(x: T | Sequence[T], n: int) -> tuple[T, ...]:
             raise ValueError(f"Length of {x} (length = {len(x)} is not equal to {n})")
     else:
         return tuple(repeat(x, n))
+
+
+ComplexArray = Complex[Array, "..."]
+
+
+def apply_componentwise(
+    fn: Callable[[ComplexArray], ComplexArray],
+) -> Callable[[ComplexArray], ComplexArray]:
+    """Given a function fn: R -> R, return a complex function C->C that applies
+    fn separately on the real and imaginary components of the input x.
+
+    This is useful for neural network architectures involving complex numbered data,
+    such as the Fourier Neural Operator and its variants"""
+
+    def _inner(x: ComplexArray) -> ComplexArray:
+        return jax.lax.complex(fn(jax.lax.real(x)), fn(jax.lax.imag(x)))
+
+    return _inner

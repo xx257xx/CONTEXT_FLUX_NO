@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 from context_flux_no.nn.embedding import PatchEmbedding
+from context_flux_no.nn.misc import apply_componentwise
 
 
 def test_patchembedding_init():
@@ -91,3 +92,16 @@ def test_patchembedding_3d():
 
     # No padding when not needed
     assert patchembed_3d.maybe_pad(test_img).shape == (3, 12, 15, 14)
+
+
+def test_apply_componentwise():
+    x_complex = jax.random.normal(jax.random.key(0), (100,), dtype=jnp.complex64)
+    y_complex = jnp.sin(x_complex)
+    y_complex_separate = apply_componentwise(jnp.sin)(x_complex)
+
+    # Re[F(x)] is not equal to F(Re[x]) in JAX
+    assert not jnp.array_equal(jnp.real(y_complex), jnp.sin(jnp.real(x_complex)))
+
+    # Function separately applied to real and imaginary parts
+    assert jnp.array_equal(jnp.real(y_complex_separate), jnp.sin(jnp.real(x_complex)))
+    assert jnp.array_equal(jnp.imag(y_complex_separate), jnp.sin(jnp.imag(x_complex)))
