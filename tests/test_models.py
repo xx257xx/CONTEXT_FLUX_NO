@@ -1,0 +1,44 @@
+import jax
+import jax.numpy as jnp
+from context_flux_no.models.dpot import TimeAggregator
+from einops import rearrange
+from jaxtyping import Array, Float
+
+
+def timeaggregator_original(
+    x: Float[Array, "*grids time channels"],
+    weights: Float[Array, "time channels channels"],
+    gamma: Float[Array, " channels"],
+    t: Float[Array, " time"],
+) -> Float[Array, "*grids channels"]:
+    """Forward pass of the TimeAggregator mirroring the original implementation at
+    https://github.com/HaoZhongkai/DPOT/blob/main/models/dpot.py#L213-L234
+
+    Note that the position of the grid axes is different from that of
+    models.dpot.TimeAggregator.
+    """
+    gamma: Float[Array, "1 channels"] = jnp.expand_dims(gamma, 0)
+    t: Float[Array, "time 1"] = jnp.expand_dims(t, -1)
+    t_embed: Float[Array, "time channels"] = jnp.cos(t @ gamma)
+    return jnp.einsum("tij,...ti->...j", weights, x * t_embed)
+
+
+def test_timeaggregator():
+    agg = TimeAggregator(10, 32, key=jax.random.key(0))
+
+    x = jax.random.uniform(jax.random.key(0), (10, 32, 5, 5))
+    x_orig = rearrange(x, "t c ... -> ... t c")
+
+    out = agg(x)
+    # Output shape
+    assert out.shape == (32, 5, 5)
+
+    out_orig = timeaggregator_original(
+        x_orig, agg.weights, agg.fourier_freqs, jnp.linspace(0, 1, agg.timesteps)
+    )
+
+    # Output shape of the original TimeAggregator forward pass
+    assert out_orig.shape == (5, 5, 32)
+
+    # Identical computation performed
+    assert jnp.array_equal(rearrange(out, "c ... -> ... c"), out_orig)
