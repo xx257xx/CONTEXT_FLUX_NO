@@ -152,6 +152,7 @@ class DPOT(eqx.Module):
         num_classes: int,
         hidden_dim_patch: int,
         hidden_dim_fno: int,
+        hidden_dim_output: int,
         activation: Callable[[Array], Array] = jax.nn.gelu,
         dtype=None,
         *,
@@ -204,7 +205,7 @@ class DPOT(eqx.Module):
                 eqx.nn.ConvTranspose(
                     num_spatial_dims=num_spatial_dims,
                     in_channels=embedding_dim,
-                    out_channels=out_channels,
+                    out_channels=hidden_dim_output,
                     kernel_size=patch_size,
                     stride=patch_size,
                     dtype=dtype,
@@ -213,8 +214,8 @@ class DPOT(eqx.Module):
                 eqx.nn.Lambda(activation),
                 eqx.nn.Conv(
                     num_spatial_dims=num_spatial_dims,
-                    in_channels=out_channels,
-                    out_channels=out_channels,
+                    in_channels=hidden_dim_output,
+                    out_channels=hidden_dim_output,
                     kernel_size=1,
                     dtype=dtype,
                     key=subkeys2[1],
@@ -222,7 +223,7 @@ class DPOT(eqx.Module):
                 eqx.nn.Lambda(activation),
                 eqx.nn.Conv(
                     num_spatial_dims=num_spatial_dims,
-                    in_channels=out_channels,
+                    in_channels=hidden_dim_output,
                     out_channels=out_channels,
                     kernel_size=1,
                     dtype=dtype,
