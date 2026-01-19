@@ -7,7 +7,7 @@ from equinox._misc import default_floating_dtype
 from equinox.nn._misc import default_init, named_scope
 from jaxtyping import Array, Complex, Float, Int, PRNGKeyArray
 
-from .misc import to_complex_dtype, to_ntuple
+from ..misc import to_complex_dtype, to_ntuple
 
 
 class SpectralConv(eqx.Module):

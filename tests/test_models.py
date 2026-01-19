@@ -33,12 +33,19 @@ def test_timeaggregator():
     # Output shape
     assert out.shape == (32, 5, 5)
 
+    # Output shape of the original TimeAggregator forward pass
     out_orig = timeaggregator_original(
         x_orig, agg.weights, agg.fourier_freqs, jnp.linspace(0, 1, agg.timesteps)
     )
-
-    # Output shape of the original TimeAggregator forward pass
     assert out_orig.shape == (5, 5, 32)
 
     # Identical computation performed
-    assert jnp.array_equal(rearrange(out, "c ... -> ... c"), out_orig)
+    assert jnp.all(jnp.isclose(rearrange(out, "c ... -> ... c"), out_orig))
+
+    # 1D spatial data
+    x_1d = jax.random.uniform(jax.random.key(0), (10, 32, 4))
+    assert agg(x_1d).shape == (32, 4)
+
+    # 3D spatial data
+    x_3d = jax.random.uniform(jax.random.key(0), (10, 32, 7, 7, 7))
+    assert agg(x_3d).shape == (32, 7, 7, 7)

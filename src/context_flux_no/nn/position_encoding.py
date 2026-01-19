@@ -1,9 +1,45 @@
+import abc
+
 import equinox as eqx
 import jax.numpy as jnp
 from equinox.nn._misc import named_scope
 from jaxtyping import Array, Float, PRNGKeyArray
 
 
+class AbstractPositionEncoding(eqx.Module):
+    num_spatial_dims: eqx.AbstractVar[int]
+
+    @abc.abstractmethod
+    def __call__(
+        self, x: Float[Array, " channels *spatial_dims"]
+    ) -> Float[Array, " channels *spatial_dims"]:
+        pass
+
+
+class LearnedPositionEncoding(AbstractPositionEncoding):
+    encodings: Float[Array, "*shapes embedding_dim"]
+
+    def __init__(self, spatial_dims: tuple[int, ...], channels: int):
+        self.encodings = jnp.zeros(
+            (*spatial_dims, channels),
+        )
+
+    def __call__(
+        self, x: Float[Array, " channels *spatial_dims"]
+    ) -> Float[Array, " channels *spatial_dims"]:
+        if x.shape != self.encodings.shape:
+            raise ValueError(
+                """Input array shape does not match the shape of the learnable position 
+                encodings."""
+            )
+        return x + self.encodings
+
+    @property
+    def num_spatial_dims(self) -> int:
+        return self.encodings.ndim - 1
+
+
+# TODO: Incorporate into the AbstractPositionEncoding type hierarchy
 class SineCosinePosEncoding2D(eqx.Module):
     """Fixed 2D sine-cosine encoding for the simplified ViT, which was presented in
     L. Beyer et al, Better plain ViT baselines for ImageNet-1k, arXiv:2205.01580v1

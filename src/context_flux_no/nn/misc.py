@@ -4,7 +4,8 @@ from typing import TypeVar
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Complex
+
+from ..custom_types import ComplexArray, FloatArray
 
 
 def to_complex_dtype(dtype):
@@ -33,11 +34,8 @@ def to_ntuple(x: T | Sequence[T], n: int) -> tuple[T, ...]:
         return tuple(repeat(x, n))
 
 
-ComplexArray = Complex[Array, "..."]
-
-
 def apply_componentwise(
-    fn: Callable[[ComplexArray], ComplexArray],
+    fn: Callable[[FloatArray], FloatArray],
 ) -> Callable[[ComplexArray], ComplexArray]:
     """Given a function fn: R -> R, return a complex function C->C that applies
     fn separately on the real and imaginary components of the input x.
