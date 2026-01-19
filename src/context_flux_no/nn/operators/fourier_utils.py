@@ -1,5 +1,6 @@
+import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Int
+from jaxtyping import Array, Float, Int
 
 
 def valid_frequency_inds(
@@ -35,3 +36,19 @@ def valid_frequency_inds(
     else:
         slices.append(jnp.r_[0 : max_frequency_modes[-1] + 1])
     return jnp.ix_(*slices)
+
+
+def get_grid(
+    x: Float[Array, " channels *grids"],
+) -> Float[Array, " num_spatial_dims *grids"]:
+    _, *num_grids = x.shape
+    grids = jnp.meshgrid(*[jnp.linspace(0, 1, n) for n in num_grids], indexing="ij")
+    return jnp.stack(grids, axis=0)
+
+
+def append_grid_channels(
+    x: Float[Array, " channels *grids"],
+) -> Float[Array, " channels+num_spatial_dims *grids"]:
+    with jax.ensure_compile_time_eval():
+        grid = get_grid(x)
+    return jnp.concatenate((x, grid), axis=0)

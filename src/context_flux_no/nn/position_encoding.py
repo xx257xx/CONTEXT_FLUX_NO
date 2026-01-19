@@ -1,7 +1,9 @@
 import abc
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
+from equinox._misc import default_floating_dtype
 from equinox.nn._misc import named_scope
 from jaxtyping import Array, Float, PRNGKeyArray
 
@@ -17,11 +19,30 @@ class AbstractPositionEncoding(eqx.Module):
 
 
 class LearnedPositionEncoding(AbstractPositionEncoding):
-    encodings: Float[Array, "*shapes embedding_dim"]
+    encodings: Float[Array, " channels *spatial_dims"]
 
-    def __init__(self, spatial_dims: tuple[int, ...], channels: int):
-        self.encodings = jnp.zeros(
-            (*spatial_dims, channels),
+    def __init__(
+        self,
+        channels: int,
+        spatial_dims: tuple[int, ...],
+        init_scale: float,
+        dtype=None,
+        *,
+        key: PRNGKeyArray,
+    ):
+        if dtype is None:
+            dtype = default_floating_dtype()
+
+        self.encodings = (
+            jax.random.normal(
+                key=key,
+                shape=(
+                    channels,
+                    *spatial_dims,
+                ),
+                dtype=dtype,
+            )
+            * init_scale
         )
 
     def __call__(

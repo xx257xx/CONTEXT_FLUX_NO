@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from context_flux_no.models.dpot import TimeAggregator
+from context_flux_no.models.dpot import DPOTBlock, TimeAggregator
 from einops import rearrange
 from jaxtyping import Array, Float
 
@@ -49,3 +49,38 @@ def test_timeaggregator():
     # 3D spatial data
     x_3d = jax.random.uniform(jax.random.key(0), (10, 32, 7, 7, 7))
     assert agg(x_3d).shape == (32, 7, 7, 7)
+
+
+def test_dpot_block():
+    # 1D output shape
+    block = DPOTBlock(
+        num_spatial_dims=1,
+        channels=32,
+        max_frequency_modes=16,
+        channels_hidden=32,
+        key=jax.random.key(0),
+    )
+    img_1d = jnp.ones((32, 100))
+    assert block(img_1d).shape == img_1d.shape
+
+    # 2D output shape
+    block = DPOTBlock(
+        num_spatial_dims=2,
+        channels=32,
+        max_frequency_modes=16,
+        channels_hidden=32,
+        key=jax.random.key(0),
+    )
+    img_2d = jnp.ones((32, 100, 50))
+    assert block(img_2d).shape == img_2d.shape
+
+    # 3D output shape
+    block = DPOTBlock(
+        num_spatial_dims=3,
+        channels=32,
+        max_frequency_modes=16,
+        channels_hidden=32,
+        key=jax.random.key(0),
+    )
+    img_3d = jnp.ones((32, 100, 50, 40))
+    assert block(img_3d).shape == img_3d.shape

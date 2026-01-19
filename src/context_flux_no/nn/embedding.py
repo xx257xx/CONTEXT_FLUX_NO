@@ -100,6 +100,12 @@ class PatchEmbedding(eqx.Module):
         self.activation = activation
         self.final_activation = final_activation
 
+    def output_size(self, input_size: tuple[int, ...]) -> tuple[int, ...]:
+        output_shape = []
+        for s, p in zip(input_size, self.patch_size):
+            output_shape.append(s // p if s % p == 0 else s // p + 1)
+        return tuple(output_shape)
+
     def maybe_pad(
         self, x: Float[Array, " in_dim *grids"]
     ) -> Float[Array, " in_dim *grids_padded"]:
