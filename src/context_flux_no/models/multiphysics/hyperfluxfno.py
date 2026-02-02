@@ -7,10 +7,10 @@ import jax.numpy as jnp
 from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from ..nn import TransformerEncoderBlock
-from ..nn.embedding_old import PatchEmbedding
-from ..nn.hypernetworks import HyperFourier, HyperLinear
-from ..nn.positional_encoding import SineCosinePosEncoding2D
+from ...nn import TransformerEncoderBlock
+from ...nn.embedding_old import PatchEmbedding
+from ...nn.hypernetworks import HyperFourier, HyperLinear
+from ...nn.position_encoding import SineCosinePosEncoding2D
 
 
 # TODO: replace PatchEmbedding with the new implementation
@@ -283,7 +283,7 @@ class ViTContextHyperFluxFNO(eqx.Module):
         dt: float,
         dx: float,
         *,
-        key: jax.random.PRNGKey,
+        key: PRNGKeyArray,
     ):
         context_embed, context_patches = self.context_module(
             rearrange(context, "t d x -> t x d"),

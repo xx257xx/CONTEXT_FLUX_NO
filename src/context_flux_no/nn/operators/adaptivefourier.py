@@ -13,6 +13,16 @@ from .fourier_utils import valid_frequency_inds
 
 
 class AdaptiveFourier(eqx.Module):
+    """Implementation of the Adaptive Fourier Neural Operator [1, 2].
+
+    Adapted from the original PyTorch implementation at https://github.com/NVlabs/AFNO-transformer/tree/master.
+
+    [1] J. Guibas et al. Efficient Token Mixing for Transformers via Adaptive Fourier
+    Neural Operators. ICLR (2021).
+    [2] Z. Hao et al. DPOT: Auto-Regressive Denoising Operator Transformer for
+    Large-Scale PDE Pre-Training. ICML (2024).
+    """
+
     num_spatial_dims: int = eqx.field(static=True)
     per_block_mlp: eqx.nn.MLP
     in_channels: int = eqx.field(static=True)

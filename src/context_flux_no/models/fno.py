@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from ..nn import Fourier1D
+from ..nn.operators import Fourier1D
 
 
 ## TODO: Implement FNO2D and higher and FluxFNO, test on Burgers

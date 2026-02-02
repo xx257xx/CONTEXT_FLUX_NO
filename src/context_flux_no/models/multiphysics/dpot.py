@@ -7,11 +7,11 @@ from einops import reduce
 from equinox._misc import default_floating_dtype
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from ..nn.embedding import PatchEmbedding
-from ..nn.misc import to_ntuple
-from ..nn.operators import AdaptiveFourier
-from ..nn.operators.fourier_utils import append_grid_channels
-from ..nn.position_encoding import LearnedPositionEncoding
+from ...nn.embedding import PatchEmbedding
+from ...nn.misc import to_ntuple
+from ...nn.operators import AdaptiveFourier
+from ...nn.operators.fourier_utils import append_grid_channels
+from ...nn.position_encoding import LearnedPositionEncoding
 
 
 class TimeAggregator(eqx.Module):
@@ -123,6 +123,11 @@ class DPOTBlock(eqx.Module):
 
 
 class DPOT(eqx.Module):
+    """JAX implementation of the DPOT model presented in [1].
+
+    [1] Z. Hao et al. DPOT: Auto-Regressive Denoising Operator Transformer for
+    Large-Scale PDE Pre-Training. ICML (2024)."""
+
     patch_embedding: PatchEmbedding
     position_embedding: LearnedPositionEncoding
     time_aggregator: TimeAggregator
