@@ -255,10 +255,10 @@ class DPOT(eqx.Module):
 
     def __call__(
         self,
-        u: Float[Array, "time channels grid_x"],
+        u: Float[Array, "time channels *grids"],
         *,
         key: PRNGKeyArray | None = None,
-    ) -> tuple[Float[Array, "channels grid_x"], Float[Array, " num_classes"]]:
+    ) -> tuple[Float[Array, " channels *grids"], Float[Array, " num_classes"]]:
         del key
         # TODO: Check if normalization is actually used and implement if necessary
         if u.shape[0] != self.in_timesteps:
@@ -274,25 +274,25 @@ class DPOT(eqx.Module):
                 "Input array spatial dimensions do not match self.img_size"
             )
 
-        u: Float[Array, "time channels+num_spatial_dims grid_x"] = jax.vmap(
+        u: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
             append_grid_channels
         )(u)
 
         # Patch embedding for the spatial dimensions
-        v: Float[Array, "time channels_embed patch_x"] = eqx.filter_vmap(
+        v: Float[Array, "time channels_embed *patches"] = eqx.filter_vmap(
             self.patch_embedding
         )(u)
 
         # Apply positional embedding
-        v: Float[Array, "time channels_embed patch_x"] = eqx.filter_vmap(
+        v: Float[Array, "time channels_embed *patches"] = eqx.filter_vmap(
             self.position_embedding
         )(v)
 
         # Time aggregation layer
-        v: Float[Array, "channels_embed patch_x"] = self.time_aggregator(v)
+        v: Float[Array, " channels_embed *patches"] = self.time_aggregator(v)
 
         for dpot_block in self.blocks:
-            v: Float[Array, "channels_embed patch_x"] = dpot_block(v)
+            v: Float[Array, " channels_embed *patches"] = dpot_block(v)
 
         u_next = self.output_head(v)
 

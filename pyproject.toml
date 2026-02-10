@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "clawpack>=5.12.0",
     "dask[distributed]>=2025.11.0",
+    "diffrax>=0.7.1",
     "einops>=0.8.1",
     "equinox>=0.12.2",
     "grain>=0.2.10",

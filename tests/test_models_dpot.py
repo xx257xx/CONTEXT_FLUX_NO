@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from context_flux_no.models.dpot import DPOTBlock, TimeAggregator
+from context_flux_no.models.multiphysics.dpot import DPOTBlock, TimeAggregator
 from einops import rearrange
 from jaxtyping import Array, Float
 
