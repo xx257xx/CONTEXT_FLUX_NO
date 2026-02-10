@@ -5,7 +5,7 @@ import jax
 import numpy as np
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from ....nn.misc import atleast_nd
+from ....nn.misc import apply_along_axis, atleast_nd, maybe_split, standardize
 from .attention_blocks import SpatialAxialAttention, TemporalAttention
 
 
@@ -74,6 +74,7 @@ class HyperNetwork(eqx.Module):
     in_channels: int = eqx.field(static=True)
     patch_size: int = eqx.field(static=True)
     embedding_dim: int = eqx.field(static=True)
+    num_blocks: int = eqx.field(static=True)
     padding_mode: Literal["ZEROS", "REPLICATE", "REFLECT", "CIRCULAR"] = eqx.field(
         static=True
     )
@@ -94,6 +95,7 @@ class HyperNetwork(eqx.Module):
         self.in_channels = in_channels
         self.patch_size = patch_size
         self.embedding_dim = embedding_dim
+        self.num_blocks = num_blocks
         self.padding_mode = padding_mode
 
         key_a, key_e, key_b = jax.random.split(key, 3)
@@ -176,13 +178,14 @@ class HyperNetwork(eqx.Module):
         u: Float[Array, "time in_channels *grids"],
         *,
         key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
     ) -> Float[Array, "time embedding_dim patch_x patch_y patch_z"]:
         num_spatial_dims = u.ndim - 2
+        u, _ = standardize(u, axis=(0,) + tuple(range(2, u.ndim)))
 
-        # Add dimension manipulation and standardization here
-
-        u: Float[Array, "time embedding_dim//4 *grids"] = self.adapter(u)
-
+        u: Float[Array, "time embedding_dim//4 *grids"] = apply_along_axis(
+            self.adapter, u, axis=1
+        )
         v: Float[Array, "time embedding_dim *patches"] = eqx.filter_vmap(
             self.encoders[num_spatial_dims]
         )(u)
@@ -190,6 +193,7 @@ class HyperNetwork(eqx.Module):
             v, n=5
         )
 
-        for block in self.blocks:
-            v = block(v)
+        keys = maybe_split(key, self.num_blocks)
+        for block, k in zip(self.blocks, keys):
+            v = block(v, key=k, inference=inference)
         return v

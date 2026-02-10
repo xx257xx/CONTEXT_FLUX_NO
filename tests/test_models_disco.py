@@ -1,10 +1,15 @@
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 import pytest
 from context_flux_no.models.multiphysics.disco.attention_blocks import (
     AttentionBlock1D,
     SpatialAxialAttention,
     TemporalAttention,
+)
+from context_flux_no.models.multiphysics.disco.hypernet import (
+    HyperNetwork,
+    SpaceTimeBlock,
 )
 
 
@@ -102,3 +107,43 @@ def test_spatial_axial_attention():
         eqx.filter_vmap(lambda x: spatial(x, key=jax.random.key(2)))(test_arr).shape
         == test_arr.shape
     )
+
+
+def test_spacetime_block():
+    block = SpaceTimeBlock(
+        channels=384, num_heads=6, droppath=0.1, key=jax.random.key(0)
+    )
+    test_arr = jnp.ones((5, 384, 2, 3, 4))
+
+    # Test model under jit
+    assert (
+        eqx.filter_jit(block)(test_arr, key=jax.random.key(1)).shape == test_arr.shape
+    )
+
+
+def test_hypernetwork():
+    hypernet = HyperNetwork(
+        in_channels=2,
+        patch_size=16,
+        embedding_dim=384,
+        num_blocks=4,
+        droppath=0.1,
+        num_heads=6,
+        key=jax.random.key(0),
+    )
+
+    test_arr_1d = jnp.ones((5, 2, 64))
+    test_arr_2d = jnp.ones((5, 2, 64, 32))
+    test_arr_3d = jnp.ones((5, 2, 64, 32, 128))
+
+    hypernet_jit = eqx.filter_jit(hypernet)
+    # Test model for 1d input
+    assert hypernet_jit(test_arr_1d, key=jax.random.key(1)).shape == (5, 384, 4, 1, 1)
+    # Test model for 1d input
+    assert hypernet_jit(test_arr_2d, key=jax.random.key(1)).shape == (5, 384, 4, 2, 1)
+    # Test model for 1d input
+    assert hypernet_jit(test_arr_3d, key=jax.random.key(1)).shape == (5, 384, 4, 2, 8)
+
+    hypernet_inf = eqx.nn.inference_mode(hypernet)
+    # Test inference mode
+    assert hypernet_inf(test_arr_3d).shape == (5, 384, 4, 2, 8)
