@@ -1,0 +1,5 @@
+name: cubicflux_1d
+dim_spatial: 1
+loadpath: ./data/cubic_no_source_large_train.hdf5
+downsample_time: 10
+time_split_index: 80

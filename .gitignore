@@ -15,7 +15,7 @@ temp/
 */pyclaw.log
 
 # Datasets
-data/
+/data/
 
 # Hydra artifacts
 multirun/
