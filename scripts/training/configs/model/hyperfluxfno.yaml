@@ -1,0 +1,22 @@
+_target_: context_flux_no.models.hyperfluxfno.ViTContextHyperFluxFNO
+data_dim: ${..data.dim_spatial}
+depth: 4
+frequency_modes: 16
+lift_dim: 96
+context_embed_dim: 96
+stencil_size: [2, 1]
+patch_size: [5, 25]
+width_lift: 128
+width_project: 128
+width_vit: 128
+width_hyper: 128
+depth_lift: 1
+depth_project: 1
+depth_vit: 4
+depth_hyper: 1
+vit_heads: 4
+dropout: 0.0
+stack_grid: true
+key:
+  _target_: jax.random.PRNGKey
+  seed: 0

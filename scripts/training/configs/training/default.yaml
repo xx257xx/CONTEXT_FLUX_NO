@@ -1,0 +1,18 @@
+context_size: 20
+segment_length: 2
+batch_size: 1024
+max_steps: 50000
+# optimizer:
+#   _target_: optax.adamw
+#   learning_rate: 1e-4
+optimizer:
+  _target_: optax.adamw
+  learning_rate:
+    _target_: optax.schedules.warmup_cosine_decay_schedule
+    init_value: 0.0
+    peak_value: 1e-3
+    warmup_steps: 5000
+    decay_steps: 45000
+    end_value: 0.0
+checkpoint_dir: ./checkpoints
+checkpoint_name: ${..data.name}_lr=${.optimizer.learning_rate}_nofilm
