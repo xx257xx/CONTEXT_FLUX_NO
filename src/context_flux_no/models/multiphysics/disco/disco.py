@@ -9,6 +9,7 @@ from jaxtyping import Array, Float, PRNGKeyArray, PyTree
 
 from ....nn.misc import destandardize, standardize
 from ....utils import num_parameters
+from ..abstract import AbstractMultiphysicsOperator
 from .hypernet import HyperNetwork
 from .operatornet import OperatorNetwork
 
@@ -17,10 +18,10 @@ class LinearVariableInFeatures(eqx.Module):
     """Same as equinox.nn.Linear, but accepts arrays with varying in_features."""
 
 
-class HyperNetworkHead(eqx.Module):
+class HyperNetworkHead[NN: eqx.Module](eqx.Module):
     linear: eqx.nn.Linear
 
-    target_static: PyTree
+    target_static: NN
     unflatten_fn: Callable
     where: Callable
     in_size: int = eqx.field(static=True)
@@ -29,7 +30,7 @@ class HyperNetworkHead(eqx.Module):
     def __init__(
         self,
         in_size: int,
-        base_network: eqx.Module,
+        base_network: NN,
         where,
         dtype=None,
         *,
@@ -49,13 +50,13 @@ class HyperNetworkHead(eqx.Module):
             target_subnetwork, eqx.is_inexact_array
         )
         _, unflatten_fn = jax.flatten_util.ravel_pytree(target_params)
-        self.target_static = target_static
+        self.target_static: NN = target_static
         self.unflatten_fn = unflatten_fn
         self.where = where
         self.in_size = in_size
         self.out_size = out_size
 
-    def param_vector_to_target(self, params: Float[Array, " out_size"]) -> eqx.Module:
+    def param_vector_to_target(self, params: Float[Array, " out_size"]) -> NN:
         target_params = self.unflatten_fn(params)
         target = eqx.combine(target_params, self.target_static)
         return target
@@ -63,11 +64,11 @@ class HyperNetworkHead(eqx.Module):
     def __call__(
         self,
         input_: Float[Array, " in_size"],
-        base_network: eqx.Module,
-        target_transform: Callable[[eqx.Module], eqx.Module] | None = None,
+        base_network: NN,
+        target_transform: Callable[[NN], NN] | None = None,
         *,
         key: PRNGKeyArray | None = None,
-    ) -> eqx.Module:
+    ) -> NN:
         params_flat = self.linear(input_)
         target = self.param_vector_to_target(params_flat)
         if target_transform is not None:
@@ -75,7 +76,7 @@ class HyperNetworkHead(eqx.Module):
         return eqx.tree_at(self.where, base_network, target)
 
 
-class DISCO(eqx.Module):
+class DISCO(AbstractMultiphysicsOperator):
     """JAX implementation of the DISCO model presented in [1].
 
     [1] R. Morel et al. DISCO: learning to DISCover an evolution Operator for
@@ -88,6 +89,7 @@ class DISCO(eqx.Module):
     operatornet_scale: PyTree
 
     num_spatial_dims: int = eqx.field(static=True)
+    channels: int = eqx.field(static=True)
     embedding_dim: int = eqx.field(static=True)
     patch_size: int = eqx.field(static=True)
     rtol: float = eqx.field(static=True)
@@ -172,6 +174,7 @@ class DISCO(eqx.Module):
         )
 
         self.num_spatial_dims = num_spatial_dims
+        self.channels = channels
         self.embedding_dim = embedding_dim
         self.patch_size = patch_size
         self.rtol = rtol
@@ -204,13 +207,13 @@ class DISCO(eqx.Module):
             stepsize_controller=dfx.PIDController(
                 rtol=self.rtol,
                 atol=self.atol,
-                dtmin=1.0 / (self.max_steps - 1),
+                dtmin=1.0 / self.max_steps,
                 force_dtmin=True,
             ),
             adjoint=dfx.RecursiveCheckpointAdjoint(),
-            max_steps=self.max_steps,
+            max_steps=2 * self.max_steps,
         )
-        return sol.ys
+        return sol.ys[0]
 
     def __call__(
         self,
@@ -218,7 +221,7 @@ class DISCO(eqx.Module):
         *,
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
-    ) -> Float[Array, " channels *grids"]:
+    ) -> tuple[Float[Array, " channels *grids"], None]:
         # Normalize input
         axis_spatial = tuple(range(2, u.ndim))
         u, stats_global = standardize(u, axis=(0,) + axis_spatial)
@@ -248,4 +251,4 @@ class DISCO(eqx.Module):
         u1: Float[Array, " channels *grids"] = destandardize(u1, **stats)
         u1 = destandardize(jnp.expand_dims(u1, axis=0), **stats_global)
         u1 = jnp.squeeze(u1, axis=0)
-        return u1
+        return u1, None

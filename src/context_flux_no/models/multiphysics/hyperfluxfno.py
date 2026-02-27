@@ -11,6 +11,7 @@ from ...nn import TransformerEncoderBlock
 from ...nn.embedding_old import PatchEmbedding
 from ...nn.hypernetworks import HyperFourier, HyperLinear
 from ...nn.position_encoding import SineCosinePosEncoding2D
+from .abstract import AbstractMultiphysicsOperator
 
 
 # TODO: replace PatchEmbedding with the new implementation
@@ -88,7 +89,7 @@ class ViTContextModule(eqx.Module):
         )
 
 
-class ViTContextHyperFluxFNO(eqx.Module):
+class ViTContextHyperFluxFNO(AbstractMultiphysicsOperator):
     context_module: ViTContextModule
     hypernetwork_trunk: eqx.nn.MLP
     hyperlift_layers: list[HyperLinear]
@@ -283,7 +284,8 @@ class ViTContextHyperFluxFNO(eqx.Module):
         dt: float,
         dx: float,
         *,
-        key: PRNGKeyArray,
+        key: PRNGKeyArray | None,
+        inference: bool | None,
     ):
         context_embed, context_patches = self.context_module(
             rearrange(context, "t d x -> t x d"),

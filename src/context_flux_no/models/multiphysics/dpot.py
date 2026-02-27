@@ -12,6 +12,7 @@ from ...nn.misc import to_ntuple
 from ...nn.operators import AdaptiveFourier
 from ...nn.operators.fourier_utils import append_grid_channels
 from ...nn.position_encoding import LearnedPositionEncoding
+from .abstract import AbstractMultiphysicsOperator
 
 
 class TimeAggregator(eqx.Module):
@@ -122,7 +123,7 @@ class DPOTBlock(eqx.Module):
         return y
 
 
-class DPOT(eqx.Module):
+class DPOT(AbstractMultiphysicsOperator):
     """JAX implementation of the DPOT model presented in [1].
 
     [1] Z. Hao et al. DPOT: Auto-Regressive Denoising Operator Transformer for
@@ -258,8 +259,11 @@ class DPOT(eqx.Module):
         u: Float[Array, "time channels *grids"],
         *,
         key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
     ) -> tuple[Float[Array, " channels *grids"], Float[Array, " num_classes"]]:
-        del key
+        # Model forward pass is deterministic
+        del key, inference
+
         # TODO: Check if normalization is actually used and implement if necessary
         if u.shape[0] != self.in_timesteps:
             raise ValueError(
