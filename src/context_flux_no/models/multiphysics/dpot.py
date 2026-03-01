@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import equinox as eqx
 import jax
@@ -257,12 +258,13 @@ class DPOT(AbstractMultiphysicsOperator):
     def __call__(
         self,
         u: Float[Array, "time channels *grids"],
+        args: Any = None,
         *,
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
     ) -> tuple[Float[Array, " channels *grids"], Float[Array, " num_classes"]]:
         # Model forward pass is deterministic
-        del key, inference
+        del key, inference, args
 
         # TODO: Check if normalization is actually used and implement if necessary
         if u.shape[0] != self.in_timesteps:

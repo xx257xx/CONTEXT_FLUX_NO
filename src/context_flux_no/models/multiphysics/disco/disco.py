@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import diffrax as dfx
 import equinox as eqx
@@ -218,10 +219,12 @@ class DISCO(AbstractMultiphysicsOperator):
     def __call__(
         self,
         u: Float[Array, "time channels *grids"],
+        args: Any = None,
         *,
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
     ) -> tuple[Float[Array, " channels *grids"], None]:
+        del args
         # Normalize input
         axis_spatial = tuple(range(2, u.ndim))
         u, stats_global = standardize(u, axis=(0,) + axis_spatial)

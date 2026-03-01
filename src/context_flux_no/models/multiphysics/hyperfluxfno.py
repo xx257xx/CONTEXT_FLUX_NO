@@ -8,8 +8,9 @@ from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from ...nn import TransformerEncoderBlock
-from ...nn.embedding_old import PatchEmbedding
+from ...nn.embedding import PatchEmbedding
 from ...nn.hypernetworks import HyperFourier, HyperLinear
+from ...nn.operators.fourier_utils import append_grid_channels
 from ...nn.position_encoding import SineCosinePosEncoding2D
 from .abstract import AbstractMultiphysicsOperator
 
@@ -25,6 +26,7 @@ class ViTContextModule(eqx.Module):
 
     def __init__(
         self,
+        num_spatial_dims: int,
         patch_size: tuple[int, int],
         in_channels: int,
         embedding_dim: int,
@@ -32,15 +34,22 @@ class ViTContextModule(eqx.Module):
         num_heads: int,
         num_layers: int,
         dropout: float,
+        hidden_dim_patch: int,
+        activation: Callable,
+        dtype=None,
         *,
         key: PRNGKeyArray,
     ):
         keys = jax.random.split(key, num_layers + 3)
         self.patch_embedding = PatchEmbedding(
-            patch_size,
-            in_channels,
-            embedding_dim,
-            flat_patch_positions=False,
+            num_spatial_dims=num_spatial_dims,
+            patch_size=patch_size,
+            in_dim=in_channels + num_spatial_dims,
+            embedding_dim=embedding_dim,
+            num_hidden=1,
+            hidden_dim=hidden_dim_patch,
+            activation=activation,
+            dtype=dtype,
             key=keys[0],
         )
         self.positional_encoding = SineCosinePosEncoding2D(embedding_dim, key=keys[1])
@@ -61,18 +70,16 @@ class ViTContextModule(eqx.Module):
 
     def __call__(
         self,
-        x: Float[Array, "height width channels"],
+        u: Float[Array, "time channels *grids"],
+        args: tuple[float, float],
         *,
-        key: PRNGKeyArray,
-    ) -> tuple[
-        Float[Array, " embedding_dim"],
-        Float[Array, "patches_row patches_col embedding_dim"],
-    ]:
-        x_embed: Float[Array, "patches_row patches_col embedding_dim"] = (
-            self.patch_embedding(x)
-        )
-        row, col, _ = x_embed.shape
-        x_embed = x_embed + self.positional_encoding(row, col)
+        key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
+    ) -> Float[Array, "time embedding_dim, *patches"]:
+        u_embed: Float[Array, "time embedding_dim, *patches"] = eqx.filter_vmap(
+            self.patch_embedding
+        )(u)
+        u_embed = eqx.filter_vmap(self.positional_encoding)(u_embed)
 
         x_embed = rearrange(x_embed, "row col embed -> (row col) embed")
 
@@ -279,14 +286,18 @@ class ViTContextHyperFluxFNO(AbstractMultiphysicsOperator):
 
     def __call__(
         self,
-        context: Float[Array, "time dim x"],
-        v: Float[Array, "dim x"],
-        dt: float,
-        dx: float,
+        u: Float[Array, "time channels *grids"],
+        args: tuple[float, float],
         *,
-        key: PRNGKeyArray | None,
-        inference: bool | None,
+        key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
     ):
+        dt, dx = args
+
+        u: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
+            append_grid_channels
+        )(u)
+
         context_embed, context_patches = self.context_module(
             rearrange(context, "t d x -> t x d"),
             key=key,

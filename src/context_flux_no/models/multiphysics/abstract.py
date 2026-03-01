@@ -23,6 +23,7 @@ class AbstractMultiphysicsOperator(eqx.Module):
     def __call__(
         self,
         u: Float[Array, "time channels *grids"],
+        args: Any,
         *,
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
@@ -34,6 +35,7 @@ class AbstractMultiphysicsOperator(eqx.Module):
     def rollout(
         self,
         u: Float[Array, "time channels *grids"],
+        args: Any,
         num_steps: int,
         *,
         key: PRNGKeyArray | None = None,
@@ -50,7 +52,7 @@ class AbstractMultiphysicsOperator(eqx.Module):
             Float[Array, "time channels *grids"],
             tuple[Float[Array, " channels *grids"], Any],
         ]:
-            u_out, aux = self(u_in, key=key_, inference=inference)
+            u_out, aux = self(u_in, args, key=key_, inference=inference)
             u_in_next = jnp.concatenate((u_in[1:], jnp.expand_dims(u_out, 0)), axis=0)
             return u_in_next, (u_out, aux)
 
