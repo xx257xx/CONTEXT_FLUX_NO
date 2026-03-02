@@ -104,7 +104,7 @@ class DISCO(AbstractMultiphysicsOperator):
         embedding_dim: int,
         patch_size: int,
         num_hypernet_blocks: int,
-        droppath: int,
+        droppath: float,
         num_hypernet_heads: int,
         mlp_hidden_dim: int,
         boundary_condition: str,

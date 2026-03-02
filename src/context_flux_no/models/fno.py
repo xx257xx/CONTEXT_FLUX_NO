@@ -25,6 +25,7 @@ class FNO1D(eqx.Module, strict=True):
     depth_lift: int = eqx.field(static=True)
     depth_project: int = eqx.field(static=True)
     stack_grid: bool = eqx.field(static=True)
+    residual_connection: bool = eqx.field(static=True)
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class FNO1D(eqx.Module, strict=True):
         depth_project: int = 1,
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
+        residual_connection: bool = False,
         dtype=None,
         *,
         key,
@@ -83,6 +85,7 @@ class FNO1D(eqx.Module, strict=True):
         self.depth_lift = depth_lift
         self.depth_project = depth_project
         self.stack_grid = stack_grid
+        self.residual_connection = residual_connection
 
     @property
     def layers(self) -> tuple[eqx.Module, ...]:
@@ -97,6 +100,6 @@ class FNO1D(eqx.Module, strict=True):
 
         v = eqx.filter_vmap(self.lift_layer, in_axes=-1, out_axes=-1)(v)
         for fourier in self.fourier_layers:
-            v = fourier(v)
+            v = v + fourier(v) if self.residual_connection else fourier(v)
         v = eqx.filter_vmap(self.project_layer, in_axes=-1, out_axes=-1)(v)
         return v

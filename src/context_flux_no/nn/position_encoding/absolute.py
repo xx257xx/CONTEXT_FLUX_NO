@@ -1,4 +1,5 @@
 import abc
+from typing import ClassVar
 
 import equinox as eqx
 import jax
@@ -71,6 +72,7 @@ class SineCosinePosEncoding2D(AbstractPositionEncoding):
 
     channels: int = eqx.field(static=True)
     temperature: float = eqx.field(static=True)
+    num_spatial_dims: ClassVar[int] = 2
 
     def __init__(
         self, channels: int, temperature: float = 10000.0, *, key: PRNGKeyArray
