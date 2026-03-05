@@ -1,8 +1,12 @@
+from typing import Literal
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import PRNGKeyArray
+from einops import rearrange
+from jaxtyping import Array, Float, PRNGKeyArray
 
+from ..custom_types import IntScalar
 from .dataset import PDEDataset
 
 
@@ -12,42 +16,76 @@ class SegmentLoader(eqx.Module):
     dataset: PDEDataset
     segment_length: int = eqx.field(static=True)
     batch_size: int = eqx.field(static=True)
+    batching_strategy: Literal["random", "consecutive_segments"] = "random"
+
+    def __check_init__(self):
+        if self.batching_strategy == "consecutive_segments":
+            if len(self.dataset.t) <= self.segment_length + self.batch_size:
+                raise ValueError(
+                    f"""To use consecutive_segments batching strategy, the batch size 
+                    must be less than len(self.dataset.t)-self.segment_length=
+                    {len(self.dataset.t) - self.segment_length}. 
+                    """
+                )
 
     def init(self, seed: int = 0) -> PRNGKeyArray:
         return jax.random.key(seed)
 
+    def select_segment(
+        self, idx_traj: IntScalar, idx_t0: IntScalar
+    ) -> Float[Array, "segment_length ..."]:
+        """Given scalar integer indices for the trajectory (`idx_traj`) as well as the
+        first time point (`idx_t0`), return a trajectory segment of length
+        `self.segment_length` starting from time index `idx_t0`."""
+        u_traj = jax.lax.dynamic_index_in_dim(
+            rearrange(self.dataset.u, "pde ic ... -> (pde ic) ..."),
+            index=idx_traj,
+            axis=0,
+            keepdims=False,
+        )
+        u_seg = jax.lax.dynamic_slice_in_dim(
+            u_traj, start_index=idx_t0, slice_size=self.segment_length, axis=0
+        )
+        return u_seg
+
     def load_batch(self, loader_state):
-        loader_state_next, key_batch = jax.random.split(loader_state, 2)
+        loader_state_next, key_traj, key_t0 = jax.random.split(loader_state, 3)
 
-        @jax.vmap
-        def _load_single(key_: PRNGKeyArray):
-            keys = jax.random.split(key_, 3)
-            u_pde = jax.lax.dynamic_index_in_dim(
-                self.dataset.u,
-                jax.random.randint(keys[0], (), 0, self.dataset.num_pde),
-                keepdims=False,
+        if self.batching_strategy == "random":
+            inds_traj = jax.random.randint(
+                key_traj,
+                (self.batch_size,),
+                minval=0,
+                maxval=self.dataset.num_trajectories,
             )
-            u_seg = jax.lax.dynamic_index_in_dim(
-                u_pde,
-                jax.random.randint(keys[1], (), 0, self.dataset.num_ic),
-                keepdims=False,
+            inds_t0 = jax.random.randint(
+                key_t0,
+                (self.batch_size,),
+                minval=0,
+                maxval=len(self.dataset.t) - self.segment_length,
             )
+            segments = jax.vmap(self.select_segment)(inds_traj, inds_t0)
 
-            n_t = len(self.dataset.t)
-            start_ind = jax.random.randint(
-                keys[2],
+        elif self.batching_strategy == "consecutive_segments":
+            idx_traj = jax.random.randint(
+                key_traj,
                 (),
-                0,
-                n_t - self.segment_length,
+                minval=0,
+                maxval=self.dataset.num_trajectories,
             )
-            segment = jax.lax.dynamic_slice_in_dim(
-                u_seg, start_ind, self.segment_length
+            idx_t0 = jax.random.randint(
+                key_t0,
+                (),
+                minval=0,
+                maxval=len(self.dataset.t) - self.segment_length - self.batch_size,
             )
-
-            return segment
+            inds_t0 = jnp.arange(idx_t0, idx_t0 + self.batch_size, dtype=idx_t0.dtype)
+            segments = jax.vmap(self.select_segment, in_axes=(None, 0))(
+                idx_traj, inds_t0
+            )
 
         batch = (
-            _load_single(jax.random.split(key_batch, self.batch_size)),
+            segments,
             self.dataset.dt,
             self.dataset.dx,
         )

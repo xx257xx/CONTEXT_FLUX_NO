@@ -50,6 +50,11 @@ class PDEDataset(eqx.Module):
         return self.u.shape[1]
 
     @property
+    def num_trajectories(self) -> int:
+        """Number of distinct trajectories contained in the dataset"""
+        return self.num_pde * self.num_ic
+
+    @property
     def dt(self) -> Float[Array, ""]:
         return self.t[1] - self.t[0]
 
