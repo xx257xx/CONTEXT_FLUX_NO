@@ -133,6 +133,7 @@ class Trainer:
         checkpoint_dir: str | Path,
         checkpoint_name: str | None,
         wandb_kwargs: dict[str, Any],
+        config_dict: dict[str, Any],
     ):
         self.optimizer = optimizer
         self.loss_fn = loss_fn
@@ -140,6 +141,7 @@ class Trainer:
             checkpoint_dir, checkpoint_name
         )
         self.wandb_kwargs = wandb_kwargs
+        self.config_dict = config_dict
 
     def _make_checkpoint_path(
         self, checkpoint_dir: str | Path, checkpoint_name: str | None
@@ -176,7 +178,9 @@ class Trainer:
             validation_dataloader = repeat(None)
 
         with ExitStack() as stack:
-            logger = stack.enter_context(wandb.init(**self.wandb_kwargs))
+            logger = stack.enter_context(
+                wandb.init(config=self.config_dict, **self.wandb_kwargs)
+            )
             ckptr = stack.enter_context(
                 ocp.training.Checkpointer(
                     self.checkpoint_path,
@@ -185,6 +189,7 @@ class Trainer:
                         reverse=True,
                         n=1,
                     ),
+                    custom_metadata=self.config_dict["model"],
                 )
             )  # add preservation policy, custom_metadata
 

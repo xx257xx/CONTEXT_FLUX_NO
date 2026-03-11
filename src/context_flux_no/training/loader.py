@@ -1,8 +1,12 @@
+import queue
+import threading
 from typing import Literal
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
+import xarray as xr
 from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
@@ -10,6 +14,120 @@ from ..custom_types import IntScalar
 from .dataset import PDEDataset
 
 
+def make_segment_axis(dataset: xr.Dataset, segment_length: int):
+    return (
+        dataset["values"]
+        .stack(traj=("pde", "ic"))
+        .rolling(t=segment_length)
+        .construct("segment")
+        .isel({"t": slice(segment_length - 1, None)})
+        .transpose("traj", "t", "segment", "dim", ...)
+    )
+
+
+class SegmentLoaderNaive:
+    dataset: xr.Dataset
+    rng: np.random.Generator
+    segment_length: int
+    batch_size: int
+    batches_per_load: int
+
+    def __init__(
+        self,
+        dataset: xr.Dataset,
+        segment_length: int,
+        batch_size: int,
+        batches_per_load: int = 32,
+        seed: int = 0,
+    ):
+        self.dataset = make_segment_axis(dataset, segment_length)
+        self.rng = np.random.default_rng(seed)
+        self.segment_length = segment_length
+        self.batch_size = batch_size
+        self.batches_per_load = batches_per_load
+
+    def __iter__(self):
+        while True:
+            inds_traj = self._sample_traj_indices()
+            inds_t0 = self._sample_t0_indices()
+            metabatch = self.dataset.isel({"traj": inds_traj, "t": inds_t0}).to_numpy()
+            yield from metabatch
+
+    def _sample_traj_indices(self) -> xr.DataArray:
+        inds = self.rng.integers(
+            0, self.dataset.sizes["traj"], size=(self.batches_per_load, self.batch_size)
+        )
+        return xr.DataArray(inds, dims=["metabatch", "batch"])
+
+    def _sample_t0_indices(self) -> xr.DataArray:
+        inds = self.rng.integers(
+            0, self.dataset.sizes["t"], size=(self.batches_per_load, self.batch_size)
+        )
+        return xr.DataArray(inds, dims=["metabatch", "batch"])
+
+
+class SegmentLoaderBackground:
+    """Strongly inspired from levanter's BackgroundIterator class [1].
+
+    [1] https://github.com/marin-community/levanter/blob/main/src/levanter/utils/background_iterable.py"""
+
+    dataset: xr.Dataset
+    rng: np.random.Generator
+    segment_length: int
+    batch_size: int
+    batches_per_load: int
+    metabatch_queue: queue.Queue
+    producer_thread: threading.Thread
+    _stop_event: threading.Event
+
+    def __init__(
+        self,
+        dataset: xr.Dataset,
+        segment_length: int,
+        batch_size: int,
+        batches_per_load: int = 32,
+        queue_capacity: int = 5,
+        seed: int = 0,
+    ):
+        self.dataset = make_segment_axis(dataset, segment_length)
+        self.rng = np.random.default_rng(seed)
+        self.segment_length = segment_length
+        self.batch_size = batch_size
+        self.batches_per_load = batches_per_load
+
+        self.metabatch_queue = queue.Queue(maxsize=queue_capacity)
+        self._stop_event = threading.Event()
+        self.producer_thread = threading.Thread(
+            target=self._put_metabatch_into_queue, daemon=True
+        )
+        self.producer_thread.start()
+
+    def __iter__(self):
+        while not self._stop_event.is_set():
+            metabatch = self.metabatch_queue.get()
+            yield from metabatch
+
+    def _put_metabatch_into_queue(self):
+        while not self._stop_event.is_set():
+            inds_traj = self._sample_traj_indices()
+            inds_t0 = self._sample_t0_indices()
+            metabatch = self.dataset.isel({"traj": inds_traj, "t": inds_t0}).to_numpy()
+            self.metabatch_queue.put(jnp.asarray(metabatch))
+
+    def _sample_traj_indices(self) -> xr.DataArray:
+        inds = self.rng.integers(
+            0, self.dataset.sizes["traj"], size=(self.batches_per_load, self.batch_size)
+        )
+        return xr.DataArray(inds, dims=["metabatch", "batch"])
+
+    def _sample_t0_indices(self) -> xr.DataArray:
+        inds = self.rng.integers(
+            0, self.dataset.sizes["t"], size=(self.batches_per_load, self.batch_size)
+        )
+        return xr.DataArray(inds, dims=["metabatch", "batch"])
+
+
+## Older Dataloader code (loads the entire dataset into GPU RAM)
 class SegmentLoader(eqx.Module):
     """A class that loads fixed data trajectories from given dataset."""
 

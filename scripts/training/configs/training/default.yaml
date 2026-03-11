@@ -1,6 +1,9 @@
-context_size: 20
-segment_length: 2
+# Maybe separate out into loader config?
+context_length: 20
 batch_size: 1024
+batches_per_load: 250
+queue_capacity: 10
+
 max_steps: 50000
 # optimizer:
 #   _target_: optax.adamw

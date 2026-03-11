@@ -1,9 +1,9 @@
-_target_: context_flux_no.models.hyperfluxfno.ViTContextHyperFluxFNO
-data_dim: ${..data.dim_spatial}
+_target_: context_flux_no.models.multiphysics.HyperFluxFNO
+data_dim: ${..data.channels}
 depth: 4
-frequency_modes: 16
-lift_dim: 96
-context_embed_dim: 96
+frequency_modes: 10
+lift_dim: 48
+context_embed_dim: 48
 stencil_size: [2, 1]
 patch_size: [5, 25]
 width_lift: 128
@@ -16,7 +16,12 @@ depth_vit: 4
 depth_hyper: 1
 vit_heads: 4
 dropout: 0.0
+num_hidden_patch: 1
+activation:
+  _target_: hydra.utils.get_method
+  path: jax.nn.gelu
 stack_grid: true
+hypernet_init: bias_hyperinit
 key:
   _target_: jax.random.PRNGKey
   seed: 0

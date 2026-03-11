@@ -1,0 +1,19 @@
+_target_: context_flux_no.models.multiphysics.DISCO
+num_spatial_dims: ${..data.num_spatial_dims}
+channels: ${..data.channels}
+embedding_dim: 48
+patch_size: 100
+num_hypernet_blocks: 2
+droppath: 0.1
+num_hypernet_heads: 2
+mlp_hidden_dim: 48
+boundary_condition: periodic
+activation:
+  _target_: hydra.utils.get_method
+  path: jax.nn.gelu
+rtol: 5e-6
+atol: 1e-9
+max_steps: 32
+key:
+  _target_: jax.random.key
+  seed: 0
