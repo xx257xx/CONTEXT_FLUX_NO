@@ -23,6 +23,7 @@ dependencies = [
     "jaxtyping>=0.3.2",
     "matplotlib>=3.10.3",
     "more-itertools>=10.7.0",
+    "nbformat>=5.10.4",
     "netcdf4>=1.7.3",
     "numpy>=2.3.0",
     "optax>=0.2.5",
