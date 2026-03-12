@@ -26,3 +26,6 @@ wandb/
 
 # Checkpoints
 checkpoints/
+
+# Figures
+/figures/
