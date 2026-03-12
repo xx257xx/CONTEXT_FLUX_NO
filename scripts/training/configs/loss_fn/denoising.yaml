@@ -1,0 +1,2 @@
+_target_: context_flux_no.training.loss.DenoisingOneStepLoss
+noise_scale: 1e-5

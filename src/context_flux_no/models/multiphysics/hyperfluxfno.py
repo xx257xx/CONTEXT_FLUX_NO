@@ -243,7 +243,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
         return u0 + dt * (flux_model(v_l) - flux_model(v_r)) / dx, None
 
 
-class HyperFluxFNOv1(AbstractMultiphysicsOperator):
+class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
     context_module: ViTContextModule
     hypernetwork_trunk: eqx.nn.MLP
     hypernetwork_head: HypernetworkHead[FNO1D]

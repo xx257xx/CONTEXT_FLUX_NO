@@ -19,7 +19,7 @@ If submitting to a particular partition, or modifying any other sbatch arguments
 ```bash
 .venv/bin/python ./scripts/training/train_multiphysics.py model=hyperfluxfno hydra.launcher.partition=h100 --multirun
 ```
-Supported values for `model` are `hyperfluxfno`, `dpot`, and `disco`.
+Supported values for `model` are `hyperfluxfno`, `hyperfluxfno_local`, `dpot`, and `disco`.
 
 Additional parameters can be passed to alter the model configuration. Alternatively, one can change the yaml files in scripts/training/configs to change default configuration values.
 

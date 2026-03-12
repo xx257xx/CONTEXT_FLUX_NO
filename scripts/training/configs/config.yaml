@@ -2,6 +2,7 @@ defaults:
 - data: cubicflux_1d
 - model: hyperfluxfno
 - training: default
+- loss_fn: vanilla
 - override hydra/launcher: submitit_slurm
 - _self_
 
@@ -14,3 +15,5 @@ hydra:
     timeout_min: 2400
     tasks_per_node: 1
     gpus_per_node: 1
+
+gpu_id: "auto" # or integer
