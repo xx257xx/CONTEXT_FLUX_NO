@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import equinox as eqx
 import hydra
 import jax
@@ -68,7 +70,7 @@ def main(cfg: DictConfig) -> None:
         hydra.utils.instantiate(cfg.training.optimizer),
         loss_fn,
         cfg.training.checkpoint_dir,
-        checkpoint_name=model.__class__.__name__,
+        checkpoint_name=Path(model.__class__.__name__) / loss_fn.__class__.__name__,
         wandb_kwargs=cfg.wandb_kwargs,
         config_dict=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),  # ty: ignore[invalid-argument-type],
     )

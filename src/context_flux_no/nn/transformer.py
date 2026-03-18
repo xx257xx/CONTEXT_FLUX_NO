@@ -5,6 +5,8 @@ import jax
 from equinox.nn._misc import named_scope
 from jaxtyping import Array, Float, PRNGKeyArray
 
+from .misc import maybe_split
+
 
 class TransformerEncoderBlock(eqx.Module):
     attention: eqx.nn.MultiheadAttention
@@ -56,13 +58,14 @@ class TransformerEncoderBlock(eqx.Module):
         x: Float[Array, "sequence_length embedding_dim"],
         *,
         key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
     ) -> Float[Array, "sequence_length embedding_dim"]:
         # RNG keys for dropout
-        key1, key2 = jax.random.split(key, 2)
+        key1, key2 = maybe_split(key, 2)
 
         # vmap to not normalize over the first dimension
         x_norm = jax.vmap(self.layernorms[0])(x)
-        x = x + self.attention(x_norm, x_norm, x_norm, key=key1)
+        x = x + self.attention(x_norm, x_norm, x_norm, key=key1, inference=inference)
         x_norm = jax.vmap(self.layernorms[1])(x)
         # vmap as mlp also expects vectors otherwise
         return x + jax.vmap(partial(self.mlp, key=key2))(x_norm)

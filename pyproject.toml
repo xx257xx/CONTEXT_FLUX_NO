@@ -30,6 +30,7 @@ dependencies = [
     "orbax-checkpoint==0.11.25",
     "scipy>=1.15.3",
     "tensorstore>=0.1.81",
+    "the-well>=1.2.0",
     "tqdm>=4.67.1",
     "wandb>=0.22.3",
     "xarray>=2025.7.0",
