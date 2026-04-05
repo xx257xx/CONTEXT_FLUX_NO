@@ -40,12 +40,18 @@ class BlockDiagonalLinear(eqx.Module):
         wshape = (num_blocks, out_dim, in_dim)
         self.weight = default_init(key, wshape, dtype, 1 / sqrt(in_dim))
         bshape = (num_blocks, out_dim)
-        self.bias = jnp.zeros(bshape, dtype=dtype) if self.use_bias else None
+        self.bias = jnp.zeros(bshape, dtype=dtype) if use_bias else None
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_blocks = num_blocks
+        self.use_bias = use_bias
 
     @named_scope("nn.BlockDiagonalLinear")
     def __call__(
-        self, x: Float[Array, " in_features"], *, key: PRNGKeyArray
+        self, x: Float[Array, " in_features"], *, key: PRNGKeyArray | None = None
     ) -> Float[Array, " out_features"]:
+        del key
         x = rearrange(x, "(blocks in_dim) -> blocks in_dim", blocks=self.num_blocks)
         y = jnp.einsum("h i, h o i -> h o", x, self.weight)
         if self.bias is not None:

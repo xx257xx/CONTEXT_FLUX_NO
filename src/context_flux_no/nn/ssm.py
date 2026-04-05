@@ -80,6 +80,9 @@ class RG_LRU(eqx.Module):
             (channels,), min_val=a_init_minval, max_val=0.999, dtype=dtype, key=keys[2]
         )
 
+        self.channels = channels
+        self.num_heads = num_heads
+
     def _initialize_a(
         self,
         shape: tuple[int],

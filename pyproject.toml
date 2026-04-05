@@ -13,6 +13,7 @@ dependencies = [
     "diffrax>=0.7.1",
     "einops>=0.8.1",
     "equinox>=0.12.2",
+    "fsspec>=2024.10.0",
     "grain>=0.2.10",
     "h5netcdf>=1.7.3",
     "h5py>=3.14.0",
@@ -30,7 +31,8 @@ dependencies = [
     "orbax-checkpoint==0.11.25",
     "scipy>=1.15.3",
     "tensorstore>=0.1.81",
-    "tqdm>=4.67.1",
+    "the-well>=1.2.0",
+    "tqdm>=4.67.3",
     "wandb>=0.22.3",
     "xarray>=2025.7.0",
 ]
