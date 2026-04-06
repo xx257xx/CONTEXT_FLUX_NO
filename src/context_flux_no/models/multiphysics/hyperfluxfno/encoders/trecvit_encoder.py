@@ -11,7 +11,6 @@ from jaxtyping import Array, Float, PRNGKeyArray
 
 from context_flux_no.nn.embedding import PatchEmbedding
 from context_flux_no.nn.misc import maybe_split, to_ntuple
-from context_flux_no.nn.operators.fourier_utils import append_grid_channels
 from context_flux_no.nn.position_encoding import LearnedPositionEncoding
 from context_flux_no.nn.ssm import RG_LRU
 from context_flux_no.nn.transformer import TransformerEncoderBlock
@@ -235,7 +234,7 @@ class TRecViTEncoder(AbstractEncoder):
             num_spatial_dims=num_spatial_dims,
             grid_size=grid_size,
             patch_size=patch_size,
-            in_dim=in_channels + num_spatial_dims,
+            in_dim=in_channels,
             embedding_dim=embedding_dim,
             dtype=dtype,
             key=keys[0],
@@ -277,7 +276,7 @@ class TRecViTEncoder(AbstractEncoder):
     ) -> Float[Array, " embedding_dim"]:
         keys = maybe_split(key, self.depth)
         v: Float[Array, "time embedding_dim *grids_patch"] = eqx.filter_vmap(
-            lambda x: self.tokenizer(append_grid_channels(x))
+            lambda x: self.tokenizer(x)
         )(u)
         v = rearrange(v, "t embed ... -> t (...) embed")
         for temporal, spatial, k in zip(
@@ -294,4 +293,4 @@ class TRecViTEncoder(AbstractEncoder):
         # Reduce by taking mean over tokens and taking the last time point
         # Like neural CDEs, consider final state of controlled trajectory as the encoded
         # representation
-        return jnp.mean(v[-1], axis=1)
+        return jnp.mean(v[-1], axis=0)

@@ -9,7 +9,6 @@ from ..nn.operators import Fourier
 from ..nn.operators.fourier_utils import append_grid_channels
 
 
-## TODO: Implement FNO2D and higher and FluxFNO, test on Burgers
 ## TODO: Add padding?
 class FNO(eqx.Module, strict=True):
     lift_layer: eqx.nn.MLP
@@ -84,6 +83,7 @@ class FNO(eqx.Module, strict=True):
             key=keys[-1],
         )
 
+        self.num_spatial_dims = num_spatial_dims
         self.activation = activation
         self.in_channels = in_channels
         self.lift_dim = lift_dim

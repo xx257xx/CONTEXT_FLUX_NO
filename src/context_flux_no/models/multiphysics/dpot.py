@@ -135,14 +135,14 @@ class DPOT(AbstractMultiphysicsOperator):
     time_aggregator: TimeAggregator
     blocks: list[DPOTBlock]
     output_head: eqx.nn.Sequential
-    classification_head: eqx.nn.MLP
+    classification_head: eqx.nn.MLP | None
 
     num_spatial_dims: int = eqx.field(static=True)
     in_channels: int = eqx.field(static=True)
     out_channels: int = eqx.field(static=True)
     in_timesteps: int = eqx.field(static=True)
-    img_size: tuple[int, ...] = eqx.field(static=True)
-    num_classes: int = eqx.field(static=True)
+    grid_size: tuple[int, ...] = eqx.field(static=True)
+    num_classes: int | None = eqx.field(static=True)
 
     def __init__(
         self,
@@ -150,16 +150,16 @@ class DPOT(AbstractMultiphysicsOperator):
         in_channels: int,
         out_channels: int,
         in_timesteps: int,
-        img_size: int | tuple[int],
+        grid_size: int | tuple[int],
         patch_size: int | tuple[int],
         embedding_dim: int,
         max_frequency_modes: int | tuple[int],
         fno_depth: int,
         num_blocks: int,
-        num_classes: int,
         hidden_dim_patch: int,
         hidden_dim_fno: int,
         hidden_dim_output: int,
+        num_classes: int | None = None,
         activation: Callable[[Array], Array] = jax.nn.gelu,
         dtype=None,
         *,
@@ -167,7 +167,7 @@ class DPOT(AbstractMultiphysicsOperator):
     ):
         keys = jax.random.split(key, 6)
 
-        img_size = to_ntuple(img_size, num_spatial_dims)
+        grid_size = to_ntuple(grid_size, num_spatial_dims)
         patch_size = to_ntuple(patch_size, num_spatial_dims)
         self.patch_embedding = PatchEmbedding(
             num_spatial_dims=num_spatial_dims,
@@ -182,7 +182,7 @@ class DPOT(AbstractMultiphysicsOperator):
         )
         self.position_embedding = LearnedPositionEncoding(
             channels=embedding_dim,
-            spatial_dims=self.patch_embedding.output_size(img_size),
+            spatial_dims=self.patch_embedding.output_size(grid_size),
             init_scale=0.02,
             dtype=dtype,
             key=keys[1],
@@ -238,21 +238,24 @@ class DPOT(AbstractMultiphysicsOperator):
                 ),
             ]
         )
-        self.classification_head = eqx.nn.MLP(
-            in_size=embedding_dim,
-            out_size=num_classes,
-            width_size=embedding_dim,
-            depth=2,
-            activation=activation,
-            dtype=dtype,
-            key=keys[5],
-        )
+        if num_classes is not None:
+            self.classification_head = eqx.nn.MLP(
+                in_size=embedding_dim,
+                out_size=num_classes,
+                width_size=embedding_dim,
+                depth=2,
+                activation=activation,
+                dtype=dtype,
+                key=keys[5],
+            )
+        else:
+            self.classification_head = None
 
         self.num_spatial_dims = num_spatial_dims
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.in_timesteps = in_timesteps
-        self.img_size = img_size
+        self.grid_size = grid_size
         self.num_classes = num_classes
 
     def __call__(
@@ -262,7 +265,7 @@ class DPOT(AbstractMultiphysicsOperator):
         *,
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
-    ) -> tuple[Float[Array, " channels *grids"], Float[Array, " num_classes"]]:
+    ) -> tuple[Float[Array, " channels *grids"], Float[Array, " num_classes"] | None]:
         # Model forward pass is deterministic
         del key, inference, args
 
@@ -275,9 +278,9 @@ class DPOT(AbstractMultiphysicsOperator):
             raise ValueError(
                 "Input array channel dimension does not match self.in_channels"
             )
-        if u.shape[2:] != self.img_size:
+        if u.shape[2:] != self.grid_size:
             raise ValueError(
-                "Input array spatial dimensions do not match self.img_size"
+                "Input array spatial dimensions do not match self.grid_size"
             )
 
         u: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
@@ -302,6 +305,9 @@ class DPOT(AbstractMultiphysicsOperator):
 
         u_next = self.output_head(v)
 
-        cls_token: Float[Array, " channels_embed"] = reduce(v, "c ... -> c", "mean")
-        cls_pred: Float[Array, " num_classes"] = self.classification_head(cls_token)
+        if self.classification_head is not None:
+            cls_token: Float[Array, " channels_embed"] = reduce(v, "c ... -> c", "mean")
+            cls_pred: Float[Array, " num_classes"] = self.classification_head(cls_token)
+        else:
+            cls_pred = None
         return u_next, cls_pred

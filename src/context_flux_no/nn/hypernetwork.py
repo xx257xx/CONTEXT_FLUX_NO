@@ -4,9 +4,12 @@ from typing import Literal
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from context_flux_no.utils import is_floating_array, num_parameters
+
+from .structured_linear import BlockDiagonalLinear
 
 
 class HypernetworkHead[NN: eqx.Module](eqx.Module):
@@ -17,16 +20,18 @@ class HypernetworkHead[NN: eqx.Module](eqx.Module):
     some hypernetwork body module that nonlinearly maps input data to a 1D vector of
     parameters first."""
 
-    linears: list[eqx.nn.Linear | None]
+    linears: list[BlockDiagonalLinear | None]
     unflatten_fns: list[Callable[[Float[Array, " in_size"]], NN] | None]
 
     target_static: NN
     in_size: int = eqx.field(static=True)
+    num_blocks: int = eqx.field(static=True)
 
     def __init__(
         self,
         in_size: int,
         target_network: NN,
+        num_blocks: int,
         initialization: Literal["default", "bias-hyperinit"],
         *,
         key: PRNGKeyArray,
@@ -50,6 +55,7 @@ class HypernetworkHead[NN: eqx.Module](eqx.Module):
         """
         keys = jax.random.split(key)
         self.in_size = in_size
+        self.num_blocks = num_blocks
 
         target_params, target_static = eqx.partition(
             target_network, eqx.is_inexact_array
@@ -71,21 +77,26 @@ class HypernetworkHead[NN: eqx.Module](eqx.Module):
         initialization: Literal["default", "bias-hyperinit"],
         *,
         key: PRNGKeyArray,
-    ) -> tuple[eqx.nn.Linear, Callable] | tuple[None, None]:
+    ) -> tuple[BlockDiagonalLinear, Callable] | tuple[None, None]:
         num_params = num_parameters(target)
         if num_params == 0:
             return None, None
         else:
             params_flat, unflatten_fn = jax.flatten_util.ravel_pytree(target)
-            linear = eqx.nn.Linear(
+            linear = BlockDiagonalLinear(
                 in_features=self.in_size,
                 out_features=num_params,
+                num_blocks=self.num_blocks,
+                use_bias=True,
                 dtype=params_flat.dtype,
                 key=key,
             )
             if initialization == "bias-hyperinit":
                 weight = jnp.zeros_like(linear.weight)
-                bias = params_flat
+                bias = jnp.pad(params_flat, (0, linear.bias.size - params_flat.size))
+                bias = rearrange(
+                    bias, "(blocks out_dim) -> blocks out_dim", blocks=self.num_blocks
+                )
                 linear = eqx.tree_at(
                     lambda l: (l.weight, l.bias), linear, replace=(weight, bias)
                 )

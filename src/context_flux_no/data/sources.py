@@ -1,3 +1,4 @@
+from tensorstore import downsample
 import os
 from collections.abc import Sequence
 from functools import cached_property
@@ -39,6 +40,7 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
     metadata_common: dict[str, Any]
     metadata_varying: dict[str, list[Any]]
     window_size: int
+    downsample_spatial: int
     exclude_field_names: tuple[str, ...]
     file_index_offsets: list[int]
 
@@ -48,6 +50,7 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
         well_dataset_name: str,
         well_split_name: Literal["train", "valid", "test"] = "train",
         window_size: int = 21,
+        downsample_spatial: int = 1,
         exclude_field_names: Sequence[str] = [],
     ):
         dataset_dir = os.path.join(
@@ -88,6 +91,9 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
             )
         )
         self.exclude_field_names = tuple(exclude_field_names)
+        # Should implement getters and setters for self.downsample_spatial
+        self.metadata_common["spatial_resolution"] = tuple(i*downsample_spatial for i in self.metadata_common["spatial_resolution"])
+        self.downsample_spatial = downsample_spatial
 
     def _check_consistency_and_build_metadata(self):
         """For the individual files in .hdf5, make sure that they have matching fields,
@@ -100,6 +106,8 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
             "n_spatial_dims": set(),
             "spatial_dims_shape": set(),
             "field_names": set(),
+            "temporal_resolution": set(),
+            "spatial_resolution": set(),
         }
         metadata_varying = {"n_trajectories": list(), "len_trajectories": list()}
 
@@ -128,6 +136,15 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
                 metadata_common["field_names"].add(
                     tuple([tuple(file[f"t{j}_fields"].keys()) for j in range(3)])
                 )
+
+                t_grid = file["dimensions"]["time"]
+                metadata_common["temporal_resolution"].add(t_grid[1]-t_grid[0])
+                
+                spat_res = []
+                for dim_name in file["dimensions"].attrs["spatial_dims"]:
+                    x_grid = file["dimensions"][dim_name]
+                    spat_res.append(x_grid[1]-x_grid[0])
+                metadata_common["spatial_resolution"].add(tuple(spat_res))
 
                 for metadata_name, val in metadata_common.items():
                     assert (
@@ -170,7 +187,8 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
                     for n in field_names
                 ]
 
-        return rearrange(pack(fields, self._pack_pattern)[0], "t ... c -> t c ...")
+        item= rearrange(pack(fields, self._pack_pattern)[0], "t ... c -> t c ...")
+        return item[..., *self._slice_downsample]
 
     @cached_property
     def valid_field_names(self) -> tuple[tuple[str, ...], ...]:
@@ -190,3 +208,7 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
                 "*",
             ]
         )
+
+    @cached_property
+    def _slice_downsample(self) -> list[slice]:
+        return [slice(None, None, self.downsample_spatial)]*self.metadata_common["n_spatial_dims"]

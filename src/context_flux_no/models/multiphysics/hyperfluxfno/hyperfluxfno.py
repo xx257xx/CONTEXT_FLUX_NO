@@ -44,6 +44,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
         width_project: int = 128,
         width_hyper: int = 128,
         depth_hyper: int = 1,
+        blocks_hyper: int = 8,
         hypernet_init: Literal["default", "bias-hyperinit"] = "default",
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
@@ -64,7 +65,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
         self.context_encoder = make_encoder(
             encoder_type,
             num_spatial_dims=num_spatial_dims,
-            in_channels=in_channels,
+            in_channels=in_channels + num_spatial_dims if stack_grid else in_channels,
             embedding_dim=embedding_dim,
             in_timesteps=in_timesteps,
             key=keys[0],
@@ -80,7 +81,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
             key=keys[1],
         )
 
-        in_channels = (in_channels + num_spatial_dims) * (
+        in_channels_flux = (in_channels + num_spatial_dims) * (
             self.stencil_size[0] + self.stencil_size[1] + 1
         )
 
@@ -89,7 +90,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
             key_f, key_h = jax.random.split(jax.random.fold_in(keys[2], i))
             _flux_model = FNO(
                 num_spatial_dims=num_spatial_dims,
-                in_channels=in_channels,
+                in_channels=in_channels_flux,
                 lift_dim=lift_dim,
                 depth=depth,
                 frequency_modes=frequency_modes,
@@ -105,6 +106,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
                 HypernetworkHead(
                     in_size=embedding_dim,
                     target_network=_flux_model,
+                    num_blocks=blocks_hyper,
                     initialization=hypernet_init,
                     key=key_h,
                 )
@@ -213,6 +215,7 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         width_project: int = 128,
         width_hyper: int = 128,
         depth_hyper: int = 1,
+        blocks_hyper: int = 8,
         hypernet_init: Literal["default", "bias-hyperinit"] = "default",
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
@@ -233,7 +236,7 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         self.context_encoder = make_encoder(
             encoder_type,
             num_spatial_dims=num_spatial_dims,
-            in_channels=in_channels,
+            in_channels=in_channels + num_spatial_dims if stack_grid else in_channels,
             embedding_dim=embedding_dim,
             in_timesteps=in_timesteps,
             key=keys[0],
@@ -249,14 +252,14 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
             key=keys[1],
         )
 
-        in_channels = in_channels + num_spatial_dims
+        in_channels_flux = in_channels + num_spatial_dims
 
         hypernetwork_heads = []
         for i in range(num_spatial_dims):  # Need a flux model per spatial dimension
             key_f, key_h = jax.random.split(jax.random.fold_in(keys[2], i))
             _flux_model = FNO(
                 num_spatial_dims=1,
-                in_channels=in_channels,
+                in_channels=in_channels_flux,
                 lift_dim=lift_dim,
                 depth=depth,
                 frequency_modes=frequency_modes,
@@ -272,6 +275,7 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
                 HypernetworkHead(
                     in_size=embedding_dim,
                     target_network=_flux_model,
+                    num_blocks=blocks_hyper,
                     initialization=hypernet_init,
                     key=key_h,
                 )

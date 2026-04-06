@@ -1,4 +1,5 @@
-from math import sqrt
+import warnings
+from math import ceil, sqrt
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -16,6 +17,7 @@ class BlockDiagonalLinear(eqx.Module):
     out_features: int = eqx.field(static=True)
     num_blocks: int = eqx.field(static=True)
     use_bias: bool = eqx.field(static=True)
+    _in_padding: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -30,12 +32,16 @@ class BlockDiagonalLinear(eqx.Module):
         dtype = default_floating_dtype() if dtype is None else dtype
 
         if in_features % num_blocks != 0:
-            raise ValueError("in_features must be divisable by num_blocks.")
+            warnings.warn(
+                """in_features is not divisible by num_blocks. Input vector will be 
+                padded with zeros."""
+            )
         if out_features % num_blocks != 0:
-            raise ValueError("out_features must be divisable by num_blocks.")
+            warnings.warn("""out_features is not divisible by num_blocks. Output vector 
+            will be truncated to the requested size.""")
 
-        in_dim = in_features // num_blocks
-        out_dim = out_features // num_blocks
+        in_dim = ceil(in_features / num_blocks)
+        out_dim = ceil(out_features / num_blocks)
 
         wshape = (num_blocks, out_dim, in_dim)
         self.weight = default_init(key, wshape, dtype, 1 / sqrt(in_dim))
@@ -46,14 +52,17 @@ class BlockDiagonalLinear(eqx.Module):
         self.out_features = out_features
         self.num_blocks = num_blocks
         self.use_bias = use_bias
+        self._in_padding = in_dim * self.num_blocks - self.in_features
 
     @named_scope("nn.BlockDiagonalLinear")
     def __call__(
         self, x: Float[Array, " in_features"], *, key: PRNGKeyArray | None = None
     ) -> Float[Array, " out_features"]:
         del key
+        x = jnp.pad(x, (0, self._in_padding))
         x = rearrange(x, "(blocks in_dim) -> blocks in_dim", blocks=self.num_blocks)
         y = jnp.einsum("h i, h o i -> h o", x, self.weight)
         if self.bias is not None:
             y = y + self.bias
-        return rearrange(y, "blocks out_dim -> (blocks out_dim)")
+        y = rearrange(y, "blocks out_dim -> (blocks out_dim)")
+        return y[: self.out_features]
