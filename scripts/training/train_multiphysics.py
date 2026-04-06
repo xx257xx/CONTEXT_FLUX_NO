@@ -47,9 +47,13 @@ def main(cfg: DictConfig) -> None:
         jax.config.update("jax_default_device", jax.devices("gpu")[cfg.gpu_id])
 
     model = hydra.utils.instantiate(cfg.model)
-    dataset = xr.open_dataset(cfg.data.loadpath, engine="h5netcdf", chunks={}).isel(
-        {"t": slice(0, cfg.data.max_train_time_index)}
-    )
+
+    dataset_train = xr.open_dataset(
+        cfg.data.loadpath_train, engine="h5netcdf", chunks={}
+    ).isel({"t": slice(0, cfg.data.max_train_time_index)})
+    dataset_valid = xr.open_dataset(
+        cfg.data.loadpath_valid, engine="h5netcdf", chunks={}
+    ).isel({"t": slice(0, cfg.data.max_train_time_index)})
 
     loss_fn = hydra.utils.instantiate(cfg.loss_fn)
     if isinstance(loss_fn, PushforwardOneStepLoss):
@@ -57,8 +61,15 @@ def main(cfg: DictConfig) -> None:
     else:
         segment_length = cfg.training.context_length + 1
 
-    loader = SegmentLoaderBackground(
-        dataset,
+    loader_train = SegmentLoaderBackground(
+        dataset_train,
+        segment_length,
+        cfg.training.batch_size,
+        cfg.training.batches_per_load,
+        cfg.training.queue_capacity,
+    )
+    loader_valid = SegmentLoaderBackground(
+        dataset_valid,
         segment_length,
         cfg.training.batch_size,
         cfg.training.batches_per_load,
@@ -77,9 +88,9 @@ def main(cfg: DictConfig) -> None:
 
     trainer.train(
         model=model,
-        train_dataloader=loader,
-        validation_dataloader=None,
-        loss_args=get_loss_args(model, dataset),
+        train_dataloader=loader_train,
+        validation_dataloader=loader_valid,
+        loss_args=get_loss_args(model, dataset_train),
         num_steps=cfg.training.max_steps,
     )
 

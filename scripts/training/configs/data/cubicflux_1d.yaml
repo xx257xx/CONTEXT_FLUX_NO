@@ -1,5 +1,6 @@
 name: cubicflux_1d
 num_spatial_dims: 1
 channels: 1
-loadpath: ./data/cubic_no_source_large_train.hdf5
+loadpath_train: ./data/cubic_no_source_large_train.hdf5
+loadpath_valid: ./data/cubic_no_source_large_validation_seed=11.hdf5
 max_train_time_index: 80

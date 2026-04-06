@@ -176,6 +176,9 @@ class Trainer:
         )
         if validation_dataloader is None:
             validation_dataloader = repeat(None)
+            save_metric = "train_loss"
+        else:
+            save_metric = "valid_loss"
 
         with ExitStack() as stack:
             logger = stack.enter_context(
@@ -185,7 +188,7 @@ class Trainer:
                 ocp.training.Checkpointer(
                     self.checkpoint_path,
                     preservation_policy=ocp.training.preservation_policies.BestN(
-                        get_metric_fn=lambda metrics: metrics["train_loss"],
+                        get_metric_fn=lambda metrics: metrics[save_metric],
                         reverse=True,
                         n=1,
                     ),
@@ -253,7 +256,10 @@ class Trainer:
             model_valid = eqx.nn.inference_mode(state.model, True)
 
             loss_valid, metrics_valid = self.loss_fn(
-                model_valid, batch_validation, args
+                model_valid,
+                batch_validation,
+                args,
+                jax.random.fold_in(state.training_key, 1),
             )
         else:
             loss_valid, metrics_valid = None, None
