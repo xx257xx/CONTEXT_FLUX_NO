@@ -2,24 +2,27 @@ from collections.abc import Callable
 
 import equinox as eqx
 import jax
-import jax.numpy as jnp
-from jaxtyping import Array, Float
+from einops import pack, unpack
+from jaxtyping import Array, Float, PRNGKeyArray
 
-from ..nn.operators import Fourier1D
+from ..nn.operators import Fourier
+from ..nn.operators.fourier_utils import append_grid_channels
 
 
 ## TODO: Implement FNO2D and higher and FluxFNO, test on Burgers
 ## TODO: Add padding?
-class FNO1D(eqx.Module, strict=True):
+class FNO(eqx.Module, strict=True):
     lift_layer: eqx.nn.MLP
-    fourier_layers: tuple[Fourier1D, ...]
+    fourier_layers: tuple[Fourier, ...]
     project_layer: eqx.nn.MLP
     activation: Callable
-    input_dim: int = eqx.field(static=True)
+
+    num_spatial_dims: int = eqx.field(static=True)
+    in_channels: int = eqx.field(static=True)
     lift_dim: int = eqx.field(static=True)
     depth: int = eqx.field(static=True)
     frequency_modes: int = eqx.field(static=True)
-    output_dim: int = eqx.field(static=True)
+    out_channels: int = eqx.field(static=True)
     width_lift: int = eqx.field(static=True)
     width_project: int = eqx.field(static=True)
     depth_lift: int = eqx.field(static=True)
@@ -29,11 +32,12 @@ class FNO1D(eqx.Module, strict=True):
 
     def __init__(
         self,
-        input_dim: int,
+        num_spatial_dims: int,
+        in_channels: int,
         lift_dim: int,
         depth: int,
         frequency_modes: int,
-        output_dim: int | None = None,
+        out_channels: int | None = None,
         width_lift: int = 128,
         width_project: int = 128,
         depth_lift: int = 1,
@@ -43,12 +47,12 @@ class FNO1D(eqx.Module, strict=True):
         residual_connection: bool = False,
         dtype=None,
         *,
-        key,
+        key: PRNGKeyArray,
     ):
         keys = jax.random.split(key, depth + 2)
 
         self.lift_layer = eqx.nn.MLP(
-            input_dim + 1 if stack_grid else input_dim,
+            in_channels + num_spatial_dims if stack_grid else in_channels,
             lift_dim,
             width_lift,
             depth_lift,
@@ -57,16 +61,22 @@ class FNO1D(eqx.Module, strict=True):
             key=keys[0],
         )
         self.fourier_layers = tuple(
-            Fourier1D(
-                lift_dim, lift_dim, frequency_modes, activation, dtype=dtype, key=k
+            Fourier(
+                num_spatial_dims=num_spatial_dims,
+                in_channels=lift_dim,
+                out_channels=lift_dim,
+                frequency_modes=frequency_modes,
+                activation=activation,
+                dtype=dtype,
+                key=k,
             )
             for k in keys[1:-1]
         )
 
-        output_dim = input_dim if output_dim is None else output_dim
+        out_channels = in_channels if out_channels is None else out_channels
         self.project_layer = eqx.nn.MLP(
             lift_dim,
-            output_dim,
+            out_channels,
             width_project,
             depth_project,
             activation,
@@ -75,11 +85,11 @@ class FNO1D(eqx.Module, strict=True):
         )
 
         self.activation = activation
-        self.input_dim = input_dim
+        self.in_channels = in_channels
         self.lift_dim = lift_dim
         self.depth = depth
         self.frequency_modes = frequency_modes
-        self.output_dim = output_dim
+        self.out_channels = out_channels
         self.width_lift = width_lift
         self.width_project = width_project
         self.depth_lift = depth_lift
@@ -92,14 +102,20 @@ class FNO1D(eqx.Module, strict=True):
         return (self.lift_layer, *self.fourier_layers, self.project_layer)
 
     def __call__(
-        self, v: Float[Array, "input_dim grids"]
-    ) -> Float[Array, "output_dim grids"]:
+        self, v: Float[Array, "in_channels grids"]
+    ) -> Float[Array, "out_channels grids"]:
         if self.stack_grid:
-            grid = jnp.expand_dims(jnp.linspace(0, 1, v.shape[-1]), axis=0)
-            v = jnp.concatenate((v, grid), axis=0)
+            v = append_grid_channels(v)
 
-        v = eqx.filter_vmap(self.lift_layer, in_axes=-1, out_axes=-1)(v)
+        v = self._apply_channelwise(self.lift_layer, v)
         for fourier in self.fourier_layers:
             v = v + fourier(v) if self.residual_connection else fourier(v)
-        v = eqx.filter_vmap(self.project_layer, in_axes=-1, out_axes=-1)(v)
+        v = self._apply_channelwise(self.project_layer, v)
         return v
+
+    def _apply_channelwise(
+        self, layer, x: Float[Array, " channels *grids"]
+    ) -> Float[Array, " channels_out *grids"]:
+        x_, ps = pack([x], "C *")
+        y_ = eqx.filter_vmap(layer, in_axes=-1, out_axes=-1)(x_)
+        return unpack(y_, ps, "C *")[0]

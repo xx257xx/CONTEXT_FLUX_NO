@@ -1,18 +1,22 @@
 from collections.abc import Callable, Sequence
 from functools import partial
-from math import ceil, sqrt
+from math import sqrt
+from typing import ClassVar
 
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from context_flux_no.nn.embedding import PatchEmbedding
 from context_flux_no.nn.misc import maybe_split, to_ntuple
 from context_flux_no.nn.operators.fourier_utils import append_grid_channels
-from context_flux_no.nn.position_encoding.absolute import LearnedPositionEncoding
+from context_flux_no.nn.position_encoding import LearnedPositionEncoding
 from context_flux_no.nn.ssm import RG_LRU
 from context_flux_no.nn.transformer import TransformerEncoderBlock
+
+from .base import AbstractEncoder
 
 
 class Tokenizer(eqx.Module):
@@ -58,7 +62,7 @@ class Tokenizer(eqx.Module):
         # init_scale consistent with that of https://github.com/google-deepmind/trecvit/blob/main/trecvit/utils.py
         self.position_encoding = LearnedPositionEncoding(
             channels=embedding_dim,
-            spatial_dims=tuple(ceil(g / p) for g, p in zip(grid_size, patch_size)),
+            spatial_dims=self.patch_embedding.output_size(grid_size),
             init_scale=1 / sqrt(embedding_dim),
             key=key_enc,
         )
@@ -196,15 +200,17 @@ class ResidualBlock(eqx.Module):
         return u
 
 
-class TRecViTEncoder(eqx.Module):
+class TRecViTEncoder(AbstractEncoder):
+    num_spatial_dims: int = eqx.field(static=True)
+    in_channels: int = eqx.field(static=True)
+    in_timesteps: ClassVar[None] = None
+    embedding_dim: int = eqx.field(static=True)
+
     tokenizer: Tokenizer
     temporal_layers: list[ResidualBlock]
     spatial_layers: list[TransformerEncoderBlock]
     norm: eqx.nn.LayerNorm
 
-    num_spatial_dims: int = eqx.field(static=True)
-    in_channels: int = eqx.field(static=True)
-    embedding_dim: int = eqx.field(static=True)
     depth: int = eqx.field(static=True)
 
     def __init__(
@@ -268,7 +274,7 @@ class TRecViTEncoder(eqx.Module):
         *,
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
-    ) -> Float[Array, "time embedding_dim tokens"]:
+    ) -> Float[Array, " embedding_dim"]:
         keys = maybe_split(key, self.depth)
         v: Float[Array, "time embedding_dim *grids_patch"] = eqx.filter_vmap(
             lambda x: self.tokenizer(append_grid_channels(x))
@@ -284,5 +290,8 @@ class TRecViTEncoder(eqx.Module):
                 partial(spatial, key=k, inference=inference), in_axes=0, out_axes=0
             )(v)
         v = eqx.filter_vmap(self.norm)(rearrange(v, "t tok embed -> (t tok) embed"))
-        return rearrange(v, "(t tok) embed -> t embed tok", t=u.shape[0])
-        # To reduce, take mean over tokens and maybe take the last time point?
+        v = rearrange(v, "(t tok) embed -> t tok embed", t=u.shape[0])
+        # Reduce by taking mean over tokens and taking the last time point
+        # Like neural CDEs, consider final state of controlled trajectory as the encoded
+        # representation
+        return jnp.mean(v[-1], axis=1)
