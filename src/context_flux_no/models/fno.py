@@ -1,18 +1,19 @@
 from collections.abc import Callable
+from typing import Literal
 
 import equinox as eqx
 import jax
 from einops import pack, unpack
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from ..nn.operators import Fourier
+from ..nn.operators import AdaptiveFourier, Fourier
 from ..nn.operators.fourier_utils import append_grid_channels
 
 
 ## TODO: Add padding?
 class FNO(eqx.Module, strict=True):
     lift_layer: eqx.nn.MLP
-    fourier_layers: tuple[Fourier, ...]
+    fourier_layers: tuple[Fourier | AdaptiveFourier, ...]
     project_layer: eqx.nn.MLP
     activation: Callable
 
@@ -37,6 +38,7 @@ class FNO(eqx.Module, strict=True):
         depth: int,
         frequency_modes: int,
         out_channels: int | None = None,
+        fourier_block_type: Literal["vanilla", "adaptive"] = "vanilla",
         width_lift: int = 128,
         width_project: int = 128,
         depth_lift: int = 1,
@@ -44,6 +46,7 @@ class FNO(eqx.Module, strict=True):
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
         residual_connection: bool = False,
+        num_blocks: int | None = None,
         dtype=None,
         *,
         key: PRNGKeyArray,
@@ -59,18 +62,38 @@ class FNO(eqx.Module, strict=True):
             dtype=dtype,
             key=keys[0],
         )
-        self.fourier_layers = tuple(
-            Fourier(
-                num_spatial_dims=num_spatial_dims,
-                in_channels=lift_dim,
-                out_channels=lift_dim,
-                frequency_modes=frequency_modes,
-                activation=activation,
-                dtype=dtype,
-                key=k,
+        if fourier_block_type == "vanilla":
+            self.fourier_layers = tuple(
+                Fourier(
+                    num_spatial_dims=num_spatial_dims,
+                    in_channels=lift_dim,
+                    out_channels=lift_dim,
+                    frequency_modes=frequency_modes,
+                    activation=activation,
+                    dtype=dtype,
+                    key=k,
+                )
+                for k in keys[1:-1]
             )
-            for k in keys[1:-1]
-        )
+        elif fourier_block_type == "adaptive":
+            assert (
+                num_blocks is not None
+            ), """num_blocks must be provided to use adaptive 
+            fourier layers"""
+            self.fourier_layers = tuple(
+                AdaptiveFourier(
+                    num_spatial_dims=num_spatial_dims,
+                    in_channels=lift_dim,
+                    out_channels=lift_dim,
+                    max_frequency_modes=frequency_modes,
+                    activation=activation,
+                    hidden_channels=lift_dim,
+                    num_blocks=num_blocks,
+                    dtype=dtype,
+                    key=k,
+                )
+                for k in keys[1:-1]
+            )
 
         out_channels = in_channels if out_channels is None else out_channels
         self.project_layer = eqx.nn.MLP(

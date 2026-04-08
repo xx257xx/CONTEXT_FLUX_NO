@@ -8,7 +8,7 @@ defaults:
 
 wandb_kwargs:
   entity: jhko725
-  project: hyperfluxfno
+  project: hyperfluxfno_revised
   
 hydra:
   launcher: 

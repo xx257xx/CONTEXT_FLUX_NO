@@ -5,13 +5,13 @@ out_channels: ${..data.channels}
 in_timesteps: ${..training.context_length}
 grid_size: [100,]
 patch_size: [4,]
-embedding_dim: 512
+embedding_dim: 128
 max_frequency_modes: 12
-fno_depth: 6
+fno_depth: 10
 num_blocks: 8
-hidden_dim_patch: ${.embedding_dim}
-hidden_dim_fno: ${.embedding_dim}
-hidden_dim_output: ${.embedding_dim}
+hidden_dim_patch: 512
+hidden_dim_fno: 512
+hidden_dim_output: 512
 activation:
   _target_: hydra.utils.get_method
   path: jax.nn.gelu

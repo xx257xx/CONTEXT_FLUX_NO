@@ -45,6 +45,7 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
         width_hyper: int = 128,
         depth_hyper: int = 1,
         blocks_hyper: int = 8,
+        blocks_flux: int = 8,
         hypernet_init: Literal["default", "bias-hyperinit"] = "default",
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
@@ -99,6 +100,8 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
                 width_project=width_project,
                 activation=activation,
                 residual_connection=True,
+                fourier_block_type="adaptive",
+                num_blocks=blocks_flux,
                 dtype=dtype,
                 key=key_f,
             )
