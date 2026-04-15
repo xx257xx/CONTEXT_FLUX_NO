@@ -189,6 +189,75 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
         return u0, None
 
 
+class FluxModel(eqx.Module):
+    in_channels: int = eqx.field(static=True)
+    out_channels: int = eqx.field(static=True)
+    stencil_widths: tuple[int, int] = eqx.field(static=True)
+    lift_dim: int = eqx.field(static=True)
+    hidden_dim: int = eqx.field(static=True)
+    depth: int = eqx.field(static=True)
+
+    lift_layer: eqx.nn.Conv1d
+    mlp: eqx.nn.MLP
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        stencil_widths: tuple[int, int],
+        lift_dim: int,
+        hidden_dim: int,
+        depth: int,
+        dtype=None,
+        *,
+        key: PRNGKeyArray,
+    ):
+        keys = jax.random.split(key, 2)
+        kernel_size = stencil_widths[0] + stencil_widths[1] + 1
+        self.lift_layer = eqx.nn.Conv1d(
+            in_channels=in_channels,
+            out_channels=lift_dim,
+            kernel_size=kernel_size,
+            dtype=dtype,
+            key=keys[0],
+        )
+        self.mlp = eqx.nn.MLP(
+            in_size=lift_dim,
+            out_size=out_channels,
+            width_size=hidden_dim,
+            depth=depth,
+            activation=jax.nn.gelu,
+            dtype=dtype,
+            key=keys[1],
+        )
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.stencil_widths = stencil_widths
+        self.lift_dim = lift_dim
+        self.hidden_dim = hidden_dim
+        self.depth = depth
+
+    @property
+    def stencil_size(self) -> int:
+        return sum(self.stencil_widths) + 1
+
+    def __call__(
+        self,
+        u: Float[Array, "in_channels grids"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ) -> Float[Array, "out_channels grids+1"]:
+        a, b = self.stencil_widths
+        pad_widths = [(0, 0), (a + 1, b)]
+        # Need to change mode if not periodic boundary condition
+        u_padded = jnp.pad(u, pad_widths, mode="wrap")
+        u_stencils: Float[Array, "lift_dim grids_x+1"] = self.lift_layer(u_padded)
+        f: Float[Array, "out_channels grids_x+1"] = eqx.filter_vmap(
+            self.mlp, in_axes=-1, out_axes=-1
+        )(u_stencils)
+        return f
+
+
 class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
     context_encoder: AbstractEncoder
     hypernetwork_trunk: eqx.nn.MLP
@@ -211,11 +280,9 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         encoder_type: Literal["ViT", "DPOT", "TRecViT"],
         encoder_kwargs: dict[str, Any],
         depth: int,
-        frequency_modes: int,
         lift_dim: int,
         stencil_size: int | tuple[int, int],
-        width_lift: int = 128,
-        width_project: int = 128,
+        width_flux: int = 128,
         width_hyper: int = 128,
         depth_hyper: int = 1,
         blocks_hyper: int = 8,
@@ -255,22 +322,16 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
             key=keys[1],
         )
 
-        in_channels_flux = in_channels + num_spatial_dims
-
         hypernetwork_heads = []
         for i in range(num_spatial_dims):  # Need a flux model per spatial dimension
             key_f, key_h = jax.random.split(jax.random.fold_in(keys[2], i))
-            _flux_model = FNO(
-                num_spatial_dims=1,
-                in_channels=in_channels_flux,
-                lift_dim=lift_dim,
-                depth=depth,
-                frequency_modes=frequency_modes,
+            _flux_model = FluxModel(
+                in_channels=in_channels + num_spatial_dims,
                 out_channels=in_channels,
-                width_lift=width_lift,
-                width_project=width_project,
-                activation=activation,
-                residual_connection=True,
+                stencil_widths=self.stencil_size,
+                lift_dim=lift_dim,
+                hidden_dim=width_flux,
+                depth=depth,
                 dtype=dtype,
                 key=key_f,
             )
@@ -290,36 +351,6 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         self.lift_dim = lift_dim
         self.embedding_dim = embedding_dim
         self.activation = activation
-
-    def create_stencil_axis(
-        self, v: Float[Array, " channels *grids"], axis: int
-    ) -> Float[
-        Array, "data_dim {self.stencil_size[0]}+{self.stencil_size[1]}+2 *grids"
-    ]:
-        assert self.boundary_condition == "periodic", (
-            "Other types of boundary conditions are not supported."
-        )
-        assert axis != 0, "axis=0 corresponds to the channel axis."
-        v_ = jnp.swapaxes(v, axis, -1)  # Move target axis to 1
-        p, q = self.stencil_size
-        v_padded: Float[Array, " channels grids[axis]+p+q+2 *grids_rest"] = (
-            jnp.concatenate(
-                [v_[..., -p - 1 :], v_, v_[..., 0:q]],
-                axis=-1,
-            )
-        )
-        v_out_ = jnp.stack(
-            [
-                jax.lax.dynamic_slice_in_dim(v_padded, i, p + q + 2, axis=-1)
-                for i in range(v_.shape[-1])
-            ],
-            axis=-1,
-        )
-        v_out_ = rearrange(
-            v_out_,
-            "channels ... stencil target_axis -> channels stencil ... target_axis",
-        )
-        return jnp.swapaxes(v_out_, axis + 1, -1)
 
     def __call__(
         self,
@@ -341,25 +372,20 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         u0: Float[Array, " channels *grids"] = u[-1]
         # Add flux for each spatial dimension
         for i, (hypernet_head, dx) in enumerate(zip(self.hypernetwork_heads, dxs)):
-            v0_stencil: Float[
-                Array,
-                "dim {self.stencil_size[0]}+{self.stencil_size[1]}+2 *grids",
-            ] = self.create_stencil_axis(v[-1], axis=i + 1)
             flux_model = hypernet_head(context_embed)
+            df = self._apply_flux(flux_model, v[-1], i)
 
-            v_l: Float[Array, "dim stencil *grids"] = v0_stencil[:, :-1]
-            v_r: Float[Array, "dim stencil *grids"] = v0_stencil[:, 1:]
-
-            f_l = self._apply_flux(flux_model, v_l)
-            f_r = self._apply_flux(flux_model, v_r)
-            u0 = u0 + dt * (f_l - f_r) / dx
+            u0 = u0 - dt * df / dx
 
         return u0, None
 
     def _apply_flux(
-        self, flux, v: Float[Array, "in_channels stencil *grids"]
+        self, flux, v: Float[Array, " in_channels *grids"], spatial_axis: int
     ) -> Float[Array, " out_channels *grids"]:
+        v = jnp.swapaxes(v, spatial_axis + 1, 1)
         v_, ps = pack([v], "C S *")
-        f_ = jnp.mean(eqx.filter_vmap(flux, in_axes=-1, out_axes=-1)(v_), axis=1)
-        f = unpack(f_, ps, "C *")[0]
-        return f
+        f_ = eqx.filter_vmap(flux, in_axes=-1, out_axes=-1)(v_)
+        f = unpack(f_, ps, "C S *")[0]
+        df = jnp.diff(f, axis=1)
+        df = jnp.swapaxes(df, spatial_axis + 1, 1)
+        return df

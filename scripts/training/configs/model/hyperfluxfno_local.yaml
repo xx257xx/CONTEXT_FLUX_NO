@@ -1,22 +1,21 @@
 _target_: context_flux_no.models.multiphysics.HyperFluxFNOLocal
-data_dim: ${..data.channels}
+num_spatial_dims: ${..data.num_spatial_dims}
+in_channels: ${..data.channels}
+in_timesteps: ${..training.context_length}
+embedding_dim: 128
+encoder_type: TRecViT
+encoder_kwargs:
+  grid_size: [100, ]
+  patch_size: [4, ]
+  depth: 2
+  temporal_block_width: 128
+  num_heads: 8
+  mlp_hidden_dim: 64
 depth: 4
-frequency_modes: 7
-lift_dim: 48
-context_embed_dim: 48
-stencil_size: [2, 1]
-patch_size: [5, 25]
-width_lift: 128
-width_project: 128
-width_vit: 128
-width_hyper: 128
-depth_lift: 1
-depth_project: 1
-depth_vit: 4
-depth_hyper: 1
-vit_heads: 4
-dropout: 0.0
-num_hidden_patch: 1
+lift_dim: 128
+stencil_size: [10, 10]
+width_hyper: ${.lift_dim}
+blocks_hyper: 4
 activation:
   _target_: hydra.utils.get_method
   path: jax.nn.gelu
