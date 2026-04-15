@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import equinox as eqx
+import jax
 import more_itertools
 from hydra.utils import instantiate
 from jaxtyping import PyTree
@@ -42,7 +43,9 @@ def load_model(
         model_config = mngr_load.root_metadata().custom_metadata
         model_backbone = instantiate(OmegaConf.create(model_config))
 
-        weights_backbone, rest = eqx.partition(model_backbone, eqx.is_array)
+        weights_backbone, rest = eqx.partition(
+            model_backbone, lambda x: isinstance(x, jax.Array)
+        )
         weights_load = mngr_load.load_pytree(step_number, weights_backbone)
 
     return eqx.combine(weights_load, rest)

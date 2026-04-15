@@ -1,0 +1,3 @@
+name: step
+waveform:
+  _target_: context_flux_no.waveforms.step.PeriodicRandomStepFunction1D

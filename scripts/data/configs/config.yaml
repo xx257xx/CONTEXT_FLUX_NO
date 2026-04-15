@@ -1,4 +1,6 @@
 defaults:
+  - initial_condition: grf
+  - pde: cubic_1d
   - override hydra/launcher: submitit_slurm
 
 hydra:
@@ -10,16 +12,7 @@ hydra:
 
 n_coeffs: 100
 n_ics_per_coeff: 100
-pde_factory: context_flux_no.simulations.pde.CubicFlux1D
-initial_condition:
-  _target_: context_flux_no.waveforms.grf.GaussianRandomField1D
-  covariance_fn: 
-    _target_: context_flux_no.waveforms.grf.PeriodicCov
-    corr_length: 1.0
-coeff_range_dict:
-  a: [-1.0, 1.0]
-  b: [-1.0, 1.0]
-  c: [-1.0, 1.0]
+
 x_span: [0, 1]
 Nx: 100
 t_span: [0, 0.5]
@@ -28,4 +21,6 @@ seed: 0
 dataset_type: "train"
 
 savepath: ./data
-savename: cubic_no_source_large_${.dataset_type}_seed=${.seed}.hdf5
+savename: ${.pde.name}_${.dataset_type}_${.initial_condition.name}_seed=${.seed}.hdf5
+
+gpu_id: "auto" # or integer

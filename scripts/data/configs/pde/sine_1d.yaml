@@ -1,0 +1,6 @@
+name: sine_1d
+pde_factory: context_flux_no.simulations.pde.SineFlux1D
+
+coeff_range_dict:
+  a: [-1.0, 1.0]
+  b: [-1.0, 1.0]
