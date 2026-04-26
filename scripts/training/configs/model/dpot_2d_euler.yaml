@@ -1,0 +1,20 @@
+_target_: context_flux_no.models.multiphysics.DPOT
+num_spatial_dims: ${..data.num_spatial_dims}
+in_channels: ${..data.channels}
+out_channels: ${..data.channels}
+in_timesteps: ${..training.context_length}
+grid_size: [64, 64]
+patch_size: [8, 8]
+embedding_dim: 128
+max_frequency_modes: [10, 10]
+fno_depth: 10
+num_blocks: 8
+hidden_dim_patch: 512
+hidden_dim_fno: 512
+hidden_dim_output: 512
+activation:
+  _target_: hydra.utils.get_method
+  path: jax.nn.gelu
+key:
+  _target_: jax.random.key
+  seed: 0

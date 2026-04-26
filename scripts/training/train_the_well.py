@@ -1,26 +1,12 @@
 from pathlib import Path
 
+import grain
 import hydra
 import jax
-import xarray as xr
-from context_flux_no.models.multiphysics import (
-    AbstractMultiphysicsOperator,
-    HyperFluxFNO,
-    HyperFluxFNOLocal,
-)
-from context_flux_no.training.loader import SegmentLoaderBackground
+from context_flux_no.data import TheWellDataSource
 from context_flux_no.training.loss import PushforwardOneStepLoss
 from context_flux_no.training.trainer import Trainer
 from omegaconf import DictConfig, OmegaConf
-
-
-def get_loss_args(model: AbstractMultiphysicsOperator, dataset: xr.Dataset):
-    if isinstance(model, (HyperFluxFNO, HyperFluxFNOLocal)):
-        dt = float(dataset["t"][1] - dataset["t"][0])
-        dx = float(dataset["x"][1] - dataset["x"][0])
-        return (dt, dx)
-    else:
-        return None
 
 
 @hydra.main(config_path="./configs", config_name="config", version_base=None)
@@ -31,35 +17,42 @@ def main(cfg: DictConfig) -> None:
 
     model = hydra.utils.instantiate(cfg.model)
 
-    dataset_train = xr.open_dataset(
-        cfg.data.loadpath_train, engine="h5netcdf", chunks={}
-    ).isel({"t": slice(0, cfg.data.max_train_time_index)})
-    dataset_valid = xr.open_dataset(
-        cfg.data.loadpath_valid, engine="h5netcdf", chunks={}
-    ).isel({"t": slice(0, cfg.data.max_train_time_index)})
-
     loss_fn = hydra.utils.instantiate(cfg.loss_fn)
     if isinstance(loss_fn, PushforwardOneStepLoss):
         segment_length = cfg.training.context_length + 2
     else:
         segment_length = cfg.training.context_length + 1
 
-    loader_train = SegmentLoaderBackground(
-        dataset_train,
-        segment_length,
-        cfg.training.batch_size,
-        cfg.training.batches_per_load,
-        cfg.training.queue_capacity,
+    source_train = TheWellDataSource(
+        cfg.data.well_base_path,
+        cfg.data.well_dataset_name,
+        "train",
+        window_size=segment_length,
+        downsample_spatial=cfg.data.downsample_spatial,
+        exclude_field_names=cfg.data.exclude_field_names,
     )
-    loader_valid = SegmentLoaderBackground(
-        dataset_valid,
-        segment_length,
-        cfg.training.batch_size,
-        cfg.training.batches_per_load,
-        cfg.training.queue_capacity,
+    loader_train = grain.DataLoader(
+        data_source=source_train,
+        sampler=grain.samplers.IndexSampler(len(source_train), shuffle=True, seed=0),
+        operations=[grain.transforms.Batch(batch_size=cfg.training.batch_size)],
+        worker_count=cfg.data.worker_count,
     )
 
-    # segment_length for loader must be cfg.training.context_length+2 for pushforward
+    source_valid = TheWellDataSource(
+        cfg.data.well_base_path,
+        cfg.data.well_dataset_name,
+        "valid",
+        window_size=segment_length,
+        downsample_spatial=cfg.data.downsample_spatial,
+        exclude_field_names=cfg.data.exclude_field_names,
+    )
+    loader_valid = grain.DataLoader(
+        data_source=source_valid,
+        sampler=grain.samplers.IndexSampler(len(source_valid), shuffle=True, seed=1),
+        operations=[grain.transforms.Batch(batch_size=cfg.training.batch_size)],
+        worker_count=cfg.data.worker_count,
+    )
+
     trainer = Trainer(
         hydra.utils.instantiate(cfg.training.optimizer),
         loss_fn,
@@ -75,7 +68,7 @@ def main(cfg: DictConfig) -> None:
         model=model,
         train_dataloader=loader_train,
         validation_dataloader=loader_valid,
-        loss_args=get_loss_args(model, dataset_train),
+        loss_args=(0.015, 1 / 64, 1 / 64),
         num_steps=cfg.training.max_steps,
     )
 

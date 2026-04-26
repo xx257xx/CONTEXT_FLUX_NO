@@ -60,25 +60,31 @@ def pdesolve_pyclaw(
     return u, t, x_grid
 
 
-## TODO: Generalize to nd
 def solution_to_dataset(
-    u: Float[Array, "time dim x_grid"],
+    u: Float[Array, "time dim *x_grids"],
     t: Float[Array, " time"],
-    x: Float[Array, " x_grid"],
+    xs: tuple[Float[Array, " x_grid"], ...],
     coeffs: dict[str, float],
-) -> xr.DataArray:
+) -> xr.Dataset:
+    num_spatial_dims = len(xs)
+    assert u.ndim == num_spatial_dims + 2, (
+        "The field dimensions must be (time channels *spatial_dims)."
+    )
     coeff_names = list(coeffs.keys())
     coeff_values = np.asarray(list(coeffs.values()))
 
+    spatial_dim_names = ("x", "y", "z")[:num_spatial_dims]
     coords = {
         "t": t,
-        "x": x,
         "dim": ["u"],
         "param": coeff_names,
-    }
+    } | {name: grid for name, grid in zip(spatial_dim_names, xs)}
     return xr.Dataset(
         {
-            "values": (["ic", "t", "dim", "x"], np.expand_dims(u, axis=0)),
+            "values": (
+                ["ic", "t", "dim", *spatial_dim_names],
+                np.expand_dims(u, axis=0),
+            ),
             "coeffs": (["param"], coeff_values),
         },
         coords=coords,

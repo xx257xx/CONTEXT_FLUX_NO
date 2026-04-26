@@ -1,0 +1,7 @@
+name: cubic_2d
+pde_factory: context_flux_no.simulations.pde.CubicFlux2D
+
+coeff_range_dict:
+  a: [-1.0, 1.0]
+  b: [-1.0, 1.0]
+  c: [-1.0, 1.0]

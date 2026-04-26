@@ -53,13 +53,13 @@ def generate_dataset(
 
         solutions = []
         for key_ic in key_ics:
-            sol = pde.solve_pyclaw(
+            sol = pde.solve(
                 lambda u0: initial_condition_fn(u0, key_ic),
                 x_span,
                 Nx,
                 t_span,
                 Nt,
-                bc,
+                bc=bc,
                 verbose=False,
             )
             solutions.append(sol)

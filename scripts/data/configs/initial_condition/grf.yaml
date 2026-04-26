@@ -1,4 +1,3 @@
-
 name: grf
 waveform:
   _target_: context_flux_no.waveforms.grf.GaussianRandomField1D

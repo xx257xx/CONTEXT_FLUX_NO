@@ -20,7 +20,7 @@ class Burgers1D(eqx.Module):
     def coeffs(self) -> dict[str, float]:
         return {"nu": self.nu}
 
-    def solve_pyclaw(
+    def solve(
         self,
         ic_factory: Callable[[Float[np.ndarray, " Nx"]], Float[np.ndarray, " Nx"]],
         x_span: tuple[float, float],

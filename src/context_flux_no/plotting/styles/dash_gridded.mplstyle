@@ -1,0 +1,11 @@
+figure.constrained_layout.use : True
+axes.grid : True
+axes.spines.right : False
+axes.spines.top : False
+axes3d.xaxis.panecolor : white
+axes3d.yaxis.panecolor : white
+axes3d.zaxis.panecolor : white
+grid.color : gainsboro
+grid.linestyle : --
+lines.markersize : 3.0
+font.size : 12.0

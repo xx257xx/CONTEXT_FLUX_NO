@@ -2,6 +2,7 @@ import abc
 from functools import partial
 
 import equinox as eqx
+import gstools as gs
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Complex, Float, PRNGKeyArray
@@ -149,3 +150,30 @@ class GaussianRandomField1D(eqx.Module):
         return generate_circulant_embedding_method_1d(
             len(x), x[1] - x[0], self.covariance_fn, key=key
         )
+
+
+class GaussianRandomField2D(eqx.Module):
+    covariance_fn: gs.CovModel
+    period: float
+    num_modes: int
+    _srf: gs.SRF
+
+    def __init__(
+        self, covariance_fn: gs.CovModel, period: float = 1.0, num_modes: int = 32
+    ):
+        self.covariance_fn = covariance_fn
+        self.period = period
+        self.num_modes = num_modes
+        self._srf = gs.SRF(
+            covariance_fn, generator="Fourier", period=period, mode_no=num_modes, seed=0
+        )
+
+    def sample(
+        self, xs: tuple[Float[Array, " Nx"], Float[Array, " Ny"]], key: PRNGKeyArray
+    ) -> Float[Array, "Nx Ny"]:
+        """Sample from the gaussian random field.
+
+        Assume that the x coordinates are equispaced."""
+        with jax.default_device(jax.devices("cpu")[0]):
+            seed = jax.random.bits(key)
+        return self._srf(xs, seed=seed, mesh_type="structured")
