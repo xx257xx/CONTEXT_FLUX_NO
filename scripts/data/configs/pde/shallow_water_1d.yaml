@@ -1,0 +1,7 @@
+name: shallow_water_1d
+pde_factory: context_flux_no.simulations.pde.shallow_water.ParametrizedShallowWater1D
+
+coeff_range_dict:
+  alpha: [0.5, 1.5]
+  gamma: [0.5, 1.5]
+  beta: [0.8, 1.2]

@@ -53,16 +53,18 @@ def generate_dataset(
 
         solutions = []
         for key_ic in key_ics:
-            sol = pde.solve(
-                lambda u0: initial_condition_fn(u0, key_ic),
-                x_span,
-                Nx,
-                t_span,
-                Nt,
-                bc=bc,
-                verbose=False,
-            )
-            solutions.append(sol)
-
+            try:
+                sol = pde.solve(
+                    lambda u0: initial_condition_fn(u0, key_ic),
+                    x_span,
+                    Nx,
+                    t_span,
+                    Nt,
+                    bc=bc,
+                    verbose=False,
+                )
+                solutions.append(sol)
+            except Exception:
+                continue
         solutions_all.append(xr.concat(solutions, "ic", data_vars="minimal"))
-    return xr.concat(solutions_all, "pde")
+    return xr.concat(solutions_all, "ic")  # "pde")

@@ -1,10 +1,12 @@
 import abc
+from collections.abc import Sequence
 from functools import partial
 
 import equinox as eqx
 import gstools as gs
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array, Complex, Float, PRNGKeyArray
 
 
@@ -177,3 +179,68 @@ class GaussianRandomField2D(eqx.Module):
         with jax.default_device(jax.devices("cpu")[0]):
             seed = jax.random.bits(key)
         return self._srf(xs, seed=seed, mesh_type="structured")
+
+
+class GaussianRandomField(eqx.Module):
+    covariance_fns: tuple[gs.CovModel, ...]
+    period: float
+    num_modes: int
+    dim: int
+    _srfs: tuple[gs.SRF, ...]
+    transforms: tuple
+
+    def __init__(
+        self,
+        covariance_fns: Sequence[gs.CovModel],
+        period: float = 1.0,
+        num_modes: int = 32,
+        transforms=None,
+    ):
+        dim = set(cov.dim for cov in covariance_fns)
+        assert len(dim) == 1, "Covariance functions must all have the same dimension."
+
+        self.covariance_fns = tuple(covariance_fns)
+        self.dim = dim.pop()
+
+        self.period = period
+        self.num_modes = num_modes
+
+        if transforms is None:
+            normalizers = [None] * self.channels
+        else:
+            assert len(transforms) == self.channels, (
+                "To use transforms, provide a transform per covariance function."
+            )
+            normalizers = transforms
+        self.transforms = tuple(normalizers)
+
+        self._srfs = tuple(
+            [
+                gs.SRF(
+                    cov,
+                    normalizer=norm,
+                    generator="Fourier",
+                    period=period,
+                    mode_no=num_modes,
+                )
+                for cov, norm in zip(self.covariance_fns, self.transforms)
+            ]
+        )
+
+    @property
+    def channels(self) -> int:
+        return len(self.covariance_fns)
+
+    def sample(
+        self, xs: tuple[Float[Array, " Nx"], Float[Array, " Ny"]], key: PRNGKeyArray
+    ) -> Float[Array, "Nx Ny"]:
+        """Sample from the gaussian random field.
+
+        Assume that the x coordinates are equispaced."""
+        with jax.default_device(jax.devices("cpu")[0]):
+            keys = jax.random.split(key, self.channels)
+            seeds = [jax.random.bits(k) for k in keys]
+        fields = [
+            srf(xs, seed=s, mesh_type="structured") for srf, s in zip(self._srfs, seeds)
+        ]
+        return np.stack(fields, axis=0)

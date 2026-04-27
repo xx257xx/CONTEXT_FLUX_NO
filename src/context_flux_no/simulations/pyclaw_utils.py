@@ -72,4 +72,4 @@ def apply_initial_condition(
 ) -> None:
     grid_centers = grid_centers_from_state(state)
     grid = np.meshgrid(*grid_centers)
-    state.q[0] = np.asarray(ic_factory(*grid))
+    state.q = np.asfortranarray(ic_factory(*grid))

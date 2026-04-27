@@ -76,7 +76,7 @@ def solution_to_dataset(
     spatial_dim_names = ("x", "y", "z")[:num_spatial_dims]
     coords = {
         "t": t,
-        "dim": ["u"],
+        "dim": [f"u_{i}" for i in range(u.shape[1])],
         "param": coeff_names,
     } | {name: grid for name, grid in zip(spatial_dim_names, xs)}
     return xr.Dataset(
