@@ -249,6 +249,19 @@ class Trainer:
         (loss_train, metrics_train), grads = loss_grad_fn(
             model, batch_train, args, state.training_key
         )
+        # metrics_train = metrics_train | {
+        #     "norm_weights": jnp.linalg.norm(
+        #         jax.flatten_util.ravel_pytree(eqx.filter(model, eqx.is_inexact_array))[
+        #             0
+        #         ]
+        #     ),
+        #     "norm_grads": jnp.linalg.norm(
+        #         jax.flatten_util.ravel_pytree(eqx.filter(grads, eqx.is_inexact_array))[
+        #             0
+        #         ]
+        #     ),
+        #     "norm_batch": jnp.linalg.norm(jnp.reshape(batch_train, shape=(-1))),
+        # }
         state_next = state.take_step(grads)
 
         # If validation batch is given, run model in inference mode

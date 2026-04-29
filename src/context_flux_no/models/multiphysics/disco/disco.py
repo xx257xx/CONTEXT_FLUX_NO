@@ -214,7 +214,7 @@ class DISCO(AbstractMultiphysicsOperator):
                 force_dtmin=True,
             ),
             adjoint=dfx.RecursiveCheckpointAdjoint(),
-            max_steps=2 * self.max_steps,
+            max_steps=4 * self.max_steps,
         )
         return sol.ys[0]
 

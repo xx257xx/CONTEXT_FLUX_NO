@@ -15,10 +15,14 @@ from .dataset import PDEDataset
 
 
 def make_segment_axis(dataset: xr.Dataset, segment_length: int):
+    values = dataset["values"]
+    if "pde" in values.dims:
+        values = dataset["values"].stack(traj=("pde", "ic"))
+    else:
+        values = values.rename({"ic": "traj"})
+
     return (
-        dataset["values"]
-        .stack(traj=("pde", "ic"))
-        .rolling(t=segment_length)
+        values.rolling(t=segment_length)
         .construct("segment")
         .isel({"t": slice(segment_length - 1, None)})
         .transpose("traj", "t", "segment", "dim", ...)

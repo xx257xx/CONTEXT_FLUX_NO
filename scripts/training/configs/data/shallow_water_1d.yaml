@@ -1,0 +1,6 @@
+name: shallow_water_1d
+num_spatial_dims: 1
+channels: 2
+loadpath_train: ./data/datasets/shallow_water_1d/data/train
+loadpath_valid: ./data/datasets/shallow_water_1d/data/valid/shallow_water_1d_validation_grf_seed=11.hdf5
+max_train_time_index: 80

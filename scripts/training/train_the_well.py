@@ -3,6 +3,7 @@ from pathlib import Path
 import grain
 import hydra
 import jax
+import optax
 from context_flux_no.data import TheWellDataSource
 from context_flux_no.training.loss import PushforwardOneStepLoss
 from context_flux_no.training.trainer import Trainer
@@ -54,7 +55,10 @@ def main(cfg: DictConfig) -> None:
     )
 
     trainer = Trainer(
-        hydra.utils.instantiate(cfg.training.optimizer),
+        optax.chain(
+            optax.clip_by_global_norm(1.0),
+            hydra.utils.instantiate(cfg.training.optimizer),
+        ),
         loss_fn,
         Path(cfg.training.checkpoint_dir) / cfg.data.name,
         checkpoint_name=Path(model.__class__.__name__)
