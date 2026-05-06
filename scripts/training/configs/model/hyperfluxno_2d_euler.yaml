@@ -1,0 +1,26 @@
+_target_: context_flux_no.models.multiphysics.HyperFluxFNOLocal
+num_spatial_dims: ${..data.num_spatial_dims}
+in_channels: ${..data.channels}
+in_timesteps: ${..training.context_length}
+embedding_dim: 128
+encoder_type: TRecViT
+encoder_kwargs:
+  grid_size: [64, 64]
+  patch_size: [8, 8]
+  depth: 2
+  temporal_block_width: 128
+  num_heads: 8
+  mlp_hidden_dim: 64
+depth: 5
+lift_dim: 128
+stencil_size: [8, 8]
+width_hyper: ${.lift_dim}
+blocks_hyper: 4
+activation:
+  _target_: hydra.utils.get_method
+  path: jax.nn.gelu
+stack_grid: true
+hypernet_init: bias_hyperinit
+key:
+  _target_: jax.random.PRNGKey
+  seed: 0

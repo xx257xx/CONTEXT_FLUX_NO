@@ -1,0 +1,26 @@
+defaults:
+  - initial_condition: grf
+  - pde: cubic_1d
+  - override hydra/launcher: submitit_slurm
+
+hydra:
+  launcher: 
+    timeout_min: 900
+    tasks_per_node: 1
+    gpus_per_node: 1
+
+
+n_coeffs: 100
+n_ics_per_coeff: 100
+
+x_span: [0, 1]
+Nx: 100
+t_span: [0, 0.5]
+Nt: 1000
+seed: 0
+dataset_type: "train"
+
+savepath: ./data
+savename: ${.pde.name}_${.dataset_type}_${.initial_condition.name}_seed=${.seed}.hdf5
+
+gpu_id: "auto" # or integer

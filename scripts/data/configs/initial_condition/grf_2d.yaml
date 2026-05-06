@@ -1,0 +1,8 @@
+name: grf
+waveform:
+  _target_: context_flux_no.waveforms.grf.GaussianRandomField2D
+  covariance_fn: 
+    _target_: gstools.Gaussian
+    dim: 2.0
+    var: 1.0
+    len_scale: 0.3

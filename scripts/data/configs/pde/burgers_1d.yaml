@@ -1,0 +1,6 @@
+name: burgers_1d
+pde_factory: context_flux_no.simulations.pde.burgers.ViscousBurgers1D
+
+coeff_range_dict:
+  a: [0.5, 1.5]
+  b: [0.005, 0.015]

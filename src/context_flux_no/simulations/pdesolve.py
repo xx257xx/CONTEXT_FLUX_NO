@@ -1,0 +1,91 @@
+import logging
+from collections.abc import Callable
+from typing import Literal
+
+import numpy as np
+import xarray as xr
+from clawpack import pyclaw
+from jaxtyping import Array, Float
+
+from .pyclaw_utils import (
+    apply_initial_condition,
+    bc_from_string,
+    grid_centers_from_state,
+    make_controller,
+    make_domain,
+    solution_from_controller,
+)
+
+
+ClawSolver = pyclaw.ClawSolver1D | pyclaw.ClawSolver2D | pyclaw.ClawSolver3D
+
+
+def pdesolve_pyclaw(
+    solver: ClawSolver,
+    problem_data: dict[str, float],
+    ic_factory: Callable[[Float[np.ndarray, " Nx"]], Float[np.ndarray, " Nx"]],
+    x_span: tuple[float, float],
+    Nx: int,
+    t_span: tuple[float, float],
+    Nt: int,
+    bc: Literal["periodic"],
+    *,
+    verbose: bool = True,
+) -> tuple[
+    Float[np.ndarray, "time dim x_grid"],
+    Float[np.ndarray, " time"],
+    Float[np.ndarray, " x_grid"],
+]:
+    if not verbose:
+        # See https://www.clawpack.org/pyclaw/output.html#logging
+        logger = logging.getLogger("pyclaw")
+        logger.setLevel(logging.CRITICAL)
+
+    # Need to change for >1D cases
+    solver.bc_lower[0] = solver.bc_upper[0] = bc_from_string(bc)
+    domain = make_domain(x_span, Nx)
+
+    state = pyclaw.State(domain, solver.num_eqn)
+    state.problem_data.update(problem_data)
+    apply_initial_condition(state, ic_factory)
+
+    controller = make_controller(state, domain, t_span, Nt)
+    controller.solver = solver
+
+    _ = controller.run()
+
+    u = solution_from_controller(controller)
+    t = np.asarray(controller.out_times)
+    (x_grid,) = grid_centers_from_state(state)
+    return u, t, x_grid
+
+
+def solution_to_dataset(
+    u: Float[Array, "time dim *x_grids"],
+    t: Float[Array, " time"],
+    xs: tuple[Float[Array, " x_grid"], ...],
+    coeffs: dict[str, float],
+) -> xr.Dataset:
+    num_spatial_dims = len(xs)
+    assert u.ndim == num_spatial_dims + 2, (
+        "The field dimensions must be (time channels *spatial_dims)."
+    )
+    coeff_names = list(coeffs.keys())
+    coeff_values = np.asarray(list(coeffs.values()))
+
+    spatial_dim_names = ("x", "y", "z")[:num_spatial_dims]
+    coords = {
+        "t": t,
+        "dim": [f"u_{i}" for i in range(u.shape[1])],
+        "param": coeff_names,
+    } | {name: grid for name, grid in zip(spatial_dim_names, xs)}
+    return xr.Dataset(
+        {
+            "values": (
+                ["ic", "t", "dim", *spatial_dim_names],
+                np.expand_dims(u, axis=0),
+            ),
+            "coeffs": (["param"], coeff_values),
+        },
+        coords=coords,
+    )

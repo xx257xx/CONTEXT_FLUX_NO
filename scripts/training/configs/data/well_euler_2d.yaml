@@ -1,0 +1,10 @@
+name: well_euler_2d
+num_spatial_dims: 2
+channels: 4
+
+well_base_path: "./data/datasets"
+well_dataset_name: "euler_multi_quadrants_periodicBC"
+downsample_spatial: 8
+exclude_field_names: ["pressure",]
+
+worker_count: 6
