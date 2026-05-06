@@ -56,7 +56,7 @@ def main(cfg: DictConfig) -> None:
 
     trainer = Trainer(
         optax.chain(
-            optax.clip_by_global_norm(1.0),
+            optax.clip_by_global_norm(0.1),
             hydra.utils.instantiate(cfg.training.optimizer),
         ),
         loss_fn,

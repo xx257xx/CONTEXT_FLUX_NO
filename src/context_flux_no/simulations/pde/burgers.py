@@ -86,8 +86,8 @@ class ViscousBurgers1D(eqx.Module):
 
     def flux(
         self,
-        u: Float[np.ndarray, "Nx"],
-    ) -> Float[np.ndarray, "Nx"]:
+        u: Float[np.ndarray, " Nx"],
+    ) -> Float[np.ndarray, " Nx"]:
         return self.a * u**2
 
     def solve(
@@ -151,6 +151,10 @@ class ViscousBurgers1D(eqx.Module):
         save_idx = 1
         step = 0
 
+        @eqx.filter_jit
+        def _step_fn(u, dt):
+            return self._step_periodic(u, dx, dt)
+
         while save_idx < Nt:
             if step > max_steps:
                 raise RuntimeError(
@@ -183,7 +187,7 @@ class ViscousBurgers1D(eqx.Module):
                 save_idx += 1
                 continue
 
-            u = self._step_periodic(u, dx, dt)
+            u = _step_fn(u, dt)
 
             t += dt
             step += 1
@@ -211,16 +215,16 @@ class ViscousBurgers1D(eqx.Module):
         """
 
         u_l = u
-        u_r = np.roll(u, -1)
+        u_r = jnp.roll(u, -1)
 
         f_l = self.flux(u_l)
         f_r = self.flux(u_r)
 
         # Local Rusanov speed at each interface i+1/2.
         # max |f'(u)| = max |2 a u|
-        smax = np.maximum(
-            np.abs(2.0 * self.a * u_l),
-            np.abs(2.0 * self.a * u_r),
+        smax = jnp.maximum(
+            jnp.abs(2.0 * self.a * u_l),
+            jnp.abs(2.0 * self.a * u_r),
         )
 
         # Numerical flux F_{i+1/2}
@@ -228,10 +232,10 @@ class ViscousBurgers1D(eqx.Module):
 
         # Conservative hyperbolic update:
         # -(F_{i+1/2} - F_{i-1/2}) / dx
-        hyperbolic_rhs = -(flux_half - np.roll(flux_half, 1)) / dx
+        hyperbolic_rhs = -(flux_half - jnp.roll(flux_half, 1)) / dx
 
         # Centered diffusion:
         # b * (u_{i+1} - 2u_i + u_{i-1}) / dx^2
-        diffusion_rhs = self.b * (np.roll(u, -1) - 2.0 * u + np.roll(u, 1)) / dx**2
+        diffusion_rhs = self.b * (jnp.roll(u, -1) - 2.0 * u + jnp.roll(u, 1)) / dx**2
 
         return u + dt * (hyperbolic_rhs + diffusion_rhs)

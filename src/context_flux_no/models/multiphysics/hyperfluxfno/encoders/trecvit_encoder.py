@@ -72,7 +72,7 @@ class Tokenizer(eqx.Module):
     def __call__(
         self, u: Float[Array, " channel *grids"], *, key: PRNGKeyArray | None = None
     ) -> Float[Array, " embedding_dim *grids_patch"]:
-        return self.position_encoding(self.patch_embedding(u, key=key))
+        return self.position_encoding(self.patch_embedding(u, key=key), resize=False)
 
 
 class RecurrentBlock(eqx.Module):
@@ -275,6 +275,22 @@ class TRecViTEncoder(AbstractEncoder):
         inference: bool | None = None,
     ) -> Float[Array, " embedding_dim"]:
         keys = maybe_split(key, self.depth)
+        u = jax.image.resize(
+            u,
+            (
+                u.shape[0],
+                u.shape[1],
+                *[
+                    s * p
+                    for s, p in zip(
+                        self.tokenizer.position_encoding.encodings.shape[1:],
+                        self.tokenizer.patch_embedding.patch_size,
+                    )
+                ],
+            ),
+            method="linear",
+        )
+        print(u.shape)
         v: Float[Array, "time embedding_dim *grids_patch"] = eqx.filter_vmap(
             lambda x: self.tokenizer(x)
         )(u)

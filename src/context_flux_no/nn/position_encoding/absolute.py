@@ -47,14 +47,22 @@ class LearnedPositionEncoding(AbstractPositionEncoding):
         )
 
     def __call__(
-        self, u: Float[Array, " channels *spatial_dims"]
+        self,
+        u: Float[Array, " channels *spatial_dims"],
+        *,
+        resize: bool = False,
     ) -> Float[Array, " channels *spatial_dims"]:
         if u.shape != self.encodings.shape:
-            raise ValueError(
-                """Input array shape does not match the shape of the learnable position 
-                encodings."""
-            )
-        return u + self.encodings
+            if not resize:
+                raise ValueError(
+                    """Input array shape does not match the shape of the learnable position 
+                    encodings."""
+                )
+            else:
+                encodings = jax.image.resize(self.encodings, u.shape, method="linear")
+        else:
+            encodings = self.encodings
+        return u + encodings
 
     @property
     def num_spatial_dims(self) -> int:
