@@ -1,4 +1,3 @@
-from tensorstore import downsample
 import os
 from collections.abc import Sequence
 from functools import cached_property
@@ -35,6 +34,8 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
     well_base_path: Path | str
     well_dataset_name: str
     well_split_name: Literal["train", "valid", "test", None]
+    include_filters: list[str]
+    exclude_filters: list[str]
     filesystem: fsspec.AbstractFileSystem
     datapaths: list[Path]
     metadata_common: dict[str, Any]
@@ -49,10 +50,18 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
         well_base_path: Path | str,
         well_dataset_name: str,
         well_split_name: Literal["train", "valid", "test"] = "train",
+        include_filters: list[str] = [],
+        exclude_filters: list[str] = [],
         window_size: int = 21,
         downsample_spatial: int = 1,
         exclude_field_names: Sequence[str] = [],
     ):
+        self.well_base_path = well_base_path
+        self.well_dataset_name = well_dataset_name
+        self.well_split_name = well_split_name
+        self.include_filters = include_filters
+        self.exclude_filters = exclude_filters
+
         dataset_dir = os.path.join(
             well_base_path, well_dataset_name, "data", well_split_name
         )
@@ -61,7 +70,15 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
             self.filesystem.glob(dataset_dir + "/*.h5")
             + self.filesystem.glob(dataset_dir + "/*.hdf5")
         )
-
+        # Logic from the original WellDataset code
+        if len(self.include_filters) > 0:
+            retain_files = []
+            for include_string in self.include_filters:
+                retain_files += [f for f in datapaths if include_string in f]
+            datapaths = retain_files
+        if len(self.exclude_filters) > 0:
+            for exclude_string in self.exclude_filters:
+                datapaths = [f for f in datapaths if exclude_string not in f]
         if len(datapaths) == 0:
             raise ValueError(f"""The directory {dataset_dir} does not contain any .hdf5
              extension files.""")
@@ -92,7 +109,9 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
         )
         self.exclude_field_names = tuple(exclude_field_names)
         # Should implement getters and setters for self.downsample_spatial
-        self.metadata_common["spatial_resolution"] = tuple(i*downsample_spatial for i in self.metadata_common["spatial_resolution"])
+        self.metadata_common["spatial_resolution"] = tuple(
+            i * downsample_spatial for i in self.metadata_common["spatial_resolution"]
+        )
         self.downsample_spatial = downsample_spatial
 
     def _check_consistency_and_build_metadata(self):
@@ -138,12 +157,12 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
                 )
 
                 t_grid = file["dimensions"]["time"]
-                metadata_common["temporal_resolution"].add(t_grid[1]-t_grid[0])
-                
+                metadata_common["temporal_resolution"].add(t_grid[1] - t_grid[0])
+
                 spat_res = []
                 for dim_name in file["dimensions"].attrs["spatial_dims"]:
                     x_grid = file["dimensions"][dim_name]
-                    spat_res.append(x_grid[1]-x_grid[0])
+                    spat_res.append(x_grid[1] - x_grid[0])
                 metadata_common["spatial_resolution"].add(tuple(spat_res))
 
                 for metadata_name, val in metadata_common.items():
@@ -187,7 +206,7 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
                     for n in field_names
                 ]
 
-        item= rearrange(pack(fields, self._pack_pattern)[0], "t ... c -> t c ...")
+        item = rearrange(pack(fields, self._pack_pattern)[0], "t ... c -> t c ...")
         return item[..., *self._slice_downsample]
 
     @cached_property
@@ -211,4 +230,6 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
 
     @cached_property
     def _slice_downsample(self) -> list[slice]:
-        return [slice(None, None, self.downsample_spatial)]*self.metadata_common["n_spatial_dims"]
+        return [slice(None, None, self.downsample_spatial)] * self.metadata_common[
+            "n_spatial_dims"
+        ]
