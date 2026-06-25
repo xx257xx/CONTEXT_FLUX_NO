@@ -29,6 +29,7 @@ class FNO(eqx.Module, strict=True):
     depth_project: int = eqx.field(static=True)
     stack_grid: bool = eqx.field(static=True)
     residual_connection: bool = eqx.field(static=True)
+    residual_connection_input_output: bool = eqx.field(static=True)
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class FNO(eqx.Module, strict=True):
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
         residual_connection: bool = False,
+        residual_connection_input_output: bool=False,
         num_blocks: int | None = None,
         dtype=None,
         *,
@@ -119,6 +121,7 @@ class FNO(eqx.Module, strict=True):
         self.depth_project = depth_project
         self.stack_grid = stack_grid
         self.residual_connection = residual_connection
+        self.residual_connection_input_output=residual_connection_input_output
 
     @property
     def layers(self) -> tuple[eqx.Module, ...]:
@@ -127,6 +130,7 @@ class FNO(eqx.Module, strict=True):
     def __call__(
         self, v: Float[Array, "in_channels grids"]
     ) -> Float[Array, "out_channels grids"]:
+        v0 = v
         if self.stack_grid:
             v = append_grid_channels(v)
 
@@ -134,6 +138,9 @@ class FNO(eqx.Module, strict=True):
         for fourier in self.fourier_layers:
             v = v + fourier(v) if self.residual_connection else fourier(v)
         v = self._apply_channelwise(self.project_layer, v)
+        
+        if self.residual_connection_input_output:
+            v=v0+v
         return v
 
     def _apply_channelwise(

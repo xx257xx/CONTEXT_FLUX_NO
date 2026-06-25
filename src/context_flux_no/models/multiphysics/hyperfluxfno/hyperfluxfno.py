@@ -261,7 +261,7 @@ class FluxModel(eqx.Module):
 class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
     context_encoder: AbstractEncoder
     hypernetwork_trunk: eqx.nn.MLP
-    hypernetwork_heads: tuple[HypernetworkHead[FNO], ...]
+    hypernetwork_heads: tuple[HypernetworkHead[FluxModel], ...]
 
     num_spatial_dims: int = eqx.field(static=True)
     lift_dim: int = eqx.field(static=True)
