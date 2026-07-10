@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from einops import pack, unpack
 from jaxtyping import Array, Float, PRNGKeyArray
 
+from context_flux_no.nn.channelwise import ChannelwiseMLP
 from context_flux_no.nn.hypernetwork import HypernetworkHead
 from context_flux_no.nn.operators.fourier_utils import append_grid_channels
 
@@ -20,10 +21,13 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
     context_encoder: AbstractEncoder
     hypernetwork_trunk: eqx.nn.MLP
     hypernetwork_head: HypernetworkHead[AbstractTargetNetwork]
+    lift_operator: eqx.nn.Identity | ChannelwiseMLP
+    project_operator: eqx.nn.Identity | ChannelwiseMLP
 
     num_spatial_dims: int = eqx.field(static=True)
     embedding_dim: int = eqx.field(static=True)
     boundary_condition: Literal["periodic"] = eqx.field(static=True)
+    lift_dim: int | None = eqx.field(static=True)
     stack_grid: bool = eqx.field(static=True)
     activation: Callable = eqx.field(static=True)
 
@@ -41,6 +45,8 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
         depth_hyper: int = 1,
         blocks_hyper: int = 8,
         hypernet_init: Literal["default", "bias-hyperinit"] = "default",
+        lift_dim: int | None = None,
+        depth_lift_project: int = 1,
         activation: Callable = jax.nn.gelu,
         stack_grid: bool = True,
         boundary_condition: Literal["periodic"] = "periodic",
@@ -50,7 +56,7 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
     ):
         self.boundary_condition = boundary_condition
 
-        keys = jax.random.split(key, 3)
+        keys = jax.random.split(key, 5)
 
         self.context_encoder = make_encoder(
             encoder_type,
@@ -71,14 +77,48 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
             key=keys[1],
         )
 
-        target_network_init = make_target_network(
-            target_network_type,
-            num_spatial_dims=num_spatial_dims,
-            in_channels=in_channels,
-            out_channels=in_channels,
-            key=keys[2],
-            **target_network_kwargs,
-        )
+        if lift_dim is not None:
+            # Use explicit lift / project operators
+            # FluxNO timestepping is done in the lifted space
+            self.lift_operator = ChannelwiseMLP(
+                num_spatial_dims=num_spatial_dims,
+                in_channels=in_channels,
+                out_channels=lift_dim,
+                hidden_channels=lift_dim,
+                depth=depth_lift_project,
+                activation=activation,
+                key=keys[2],
+            )
+            self.project_operator = ChannelwiseMLP(
+                num_spatial_dims=num_spatial_dims,
+                in_channels=lift_dim,
+                out_channels=in_channels,
+                hidden_channels=lift_dim,
+                depth=depth_lift_project,
+                activation=activation,
+                key=keys[3],
+            )
+
+            target_network_init = make_target_network(
+                target_network_type,
+                num_spatial_dims=num_spatial_dims,
+                in_channels=lift_dim,
+                out_channels=lift_dim,
+                key=keys[4],
+                **target_network_kwargs,
+            )
+        else:
+            self.lift_operator = eqx.nn.Identity()
+            self.project_operator = eqx.nn.Identity()
+
+            target_network_init = make_target_network(
+                target_network_type,
+                num_spatial_dims=num_spatial_dims,
+                in_channels=in_channels,
+                out_channels=in_channels,
+                key=keys[4],
+                **target_network_kwargs,
+            )
 
         self.hypernetwork_head = HypernetworkHead(
             in_size=embedding_dim,
@@ -92,6 +132,7 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
         self.stack_grid = stack_grid
         self.embedding_dim = embedding_dim
         self.activation = activation
+        self.lift_dim = lift_dim
 
     def __call__(
         self,
@@ -110,8 +151,9 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
         target_network = self.hypernetwork_head(context_embed)
 
         u0: Float[Array, " channels *grids"] = u[-1]
-        u1: Float[Array, " channels *grids"] = target_network(u0, args)
-
+        v0 = self.lift_operator(u0)
+        v1: Float[Array, " channels *grids"] = target_network(v0, args)
+        u1 = self.project_operator(v1)
         return u1, None
 
 

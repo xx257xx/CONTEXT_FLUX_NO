@@ -5,8 +5,8 @@ import jax
 import xarray as xr
 from context_flux_no.models.multiphysics import (
     AbstractMultiphysicsOperator,
-    HyperFluxFNO,
     HyperFluxFNOLocal,
+    HyperNeuralOperator,
 )
 from context_flux_no.training.loader import SegmentLoaderBackground
 from context_flux_no.training.loss import PushforwardOneStepLoss
@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 
 
 def get_loss_args(model: AbstractMultiphysicsOperator, dataset: xr.Dataset):
-    if isinstance(model, (HyperFluxFNO, HyperFluxFNOLocal)):
+    if isinstance(model, (HyperNeuralOperator, HyperFluxFNOLocal)):
         dt = float(dataset["t"][1] - dataset["t"][0])
         dx = float(dataset["x"][1] - dataset["x"][0])
         return (dt, dx)

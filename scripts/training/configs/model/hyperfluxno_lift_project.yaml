@@ -5,19 +5,19 @@ in_timesteps: ${..training.context_length}
 embedding_dim: 128
 encoder_type: TRecViT
 encoder_kwargs:
-  grid_size: [64, 64]
-  patch_size: [8, 8]
+  grid_size: [100, ]
+  patch_size: [4, ]
   depth: 2
   temporal_block_width: 128
   num_heads: 8
   mlp_hidden_dim: 64
 target_network_type: FluxNO
 target_network_kwargs: 
-  stencil_widths: [8,8]
+  stencil_widths: [10,10]
   lift_dim: 128
   hidden_dim: 128
   depth: 4
-lift_dim: 128
+lift_dim: 64
 width_hyper: 128
 blocks_hyper: 16
 activation:
