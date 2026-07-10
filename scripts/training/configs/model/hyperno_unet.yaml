@@ -1,0 +1,10 @@
+defaults:
+ - hyperno_base
+
+target_network_type: UNet
+target_network_kwargs:
+  hidden_channels_base: 8
+  groups_norm: 4
+  stack_grid: true
+
+  

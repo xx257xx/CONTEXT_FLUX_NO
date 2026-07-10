@@ -6,12 +6,12 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from .fno import FNO1D
+from .fno import FNO
 
 
 # TODO: maybe change boundary_conditoin into an enum?
 class FluxFNO1D(eqx.Module):
-    flux_model: FNO1D
+    flux_model: FNO
 
     stencil_size: tuple[int, int] = eqx.field(static=True)
     boundary_condition: Literal["periodic"] = eqx.field(static=True)
@@ -40,7 +40,8 @@ class FluxFNO1D(eqx.Module):
             else stencil_size
         )
         self.boundary_condition = boundary_condition
-        self.flux_model = FNO1D(
+        self.flux_model = FNO(
+            num_spatial_dims=1,
             input_dim=data_dim * (self.stencil_size[0] + self.stencil_size[1] + 1),
             lift_dim=lift_dim,
             depth=depth,

@@ -3,10 +3,13 @@ from typing import Literal
 
 from jaxtyping import PRNGKeyArray
 
-from .base import AbstractEncoder
-from .dpot_encoder import DPOTEncoder
-from .trecvit_encoder import TRecViTEncoder
-from .vit_encoder import ViTEncoder
+from .encoders import AbstractEncoder, DPOTEncoder, TRecViTEncoder, ViTEncoder
+from .target_networks import (
+    AbstractTargetNetwork,
+    FluxNOTargetNetwork,
+    FNOTargetNetwork,
+    UNetTargetNetwork,
+)
 
 
 def make_encoder(
@@ -62,3 +65,30 @@ def make_encoder(
             raise NotImplementedError("Unrecognized encoder type.")
 
     return encoder
+
+
+TARGET_NETWORK_DICT = {
+    "UNet": UNetTargetNetwork,
+    "FNO": FNOTargetNetwork,
+    "FluxNO": FluxNOTargetNetwork,
+}
+
+
+def make_target_network(
+    target_network_type: Literal["UNet", "FNO", "FluxNO"],
+    num_spatial_dims: int,
+    in_channels: int,
+    out_channels: int,
+    *,
+    key: PRNGKeyArray,
+    **target_network_kwargs,
+) -> AbstractTargetNetwork:
+    target_network_fn = TARGET_NETWORK_DICT[target_network_type]
+    target_network = target_network_fn(
+        num_spatial_dims=num_spatial_dims,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        key=key,
+        **target_network_kwargs,
+    )
+    return target_network
