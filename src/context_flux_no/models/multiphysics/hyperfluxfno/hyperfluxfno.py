@@ -21,6 +21,105 @@ class HyperNeuralOperator(AbstractMultiphysicsOperator):
     context_encoder: AbstractEncoder
     hypernetwork_trunk: eqx.nn.MLP
     hypernetwork_head: HypernetworkHead[AbstractTargetNetwork]
+
+    num_spatial_dims: int = eqx.field(static=True)
+    embedding_dim: int = eqx.field(static=True)
+    boundary_condition: Literal["periodic"] = eqx.field(static=True)
+    stack_grid: bool = eqx.field(static=True)
+    activation: Callable = eqx.field(static=True)
+
+    def __init__(
+        self,
+        num_spatial_dims: int,
+        in_channels: int,
+        in_timesteps: int | None,
+        embedding_dim: int,
+        encoder_type: Literal["ViT", "DPOT", "TRecViT"],
+        encoder_kwargs: dict[str, Any],
+        target_network_type: Literal["UNet", "FNO", "FluxNO"],
+        target_network_kwargs: dict[str, Any],
+        width_hyper: int = 128,
+        depth_hyper: int = 1,
+        blocks_hyper: int = 8,
+        hypernet_init: Literal["default", "bias-hyperinit"] = "default",
+        activation: Callable = jax.nn.gelu,
+        stack_grid: bool = True,
+        boundary_condition: Literal["periodic"] = "periodic",
+        dtype=None,
+        *,
+        key: PRNGKeyArray,
+    ):
+        self.boundary_condition = boundary_condition
+
+        keys = jax.random.split(key, 3)
+
+        self.context_encoder = make_encoder(
+            encoder_type,
+            num_spatial_dims=num_spatial_dims,
+            in_channels=in_channels + num_spatial_dims if stack_grid else in_channels,
+            embedding_dim=embedding_dim,
+            in_timesteps=in_timesteps,
+            key=keys[0],
+            **encoder_kwargs,
+        )
+
+        self.hypernetwork_trunk = eqx.nn.MLP(
+            in_size=embedding_dim,
+            out_size=embedding_dim,
+            width_size=width_hyper,
+            depth=depth_hyper,
+            activation=activation,
+            key=keys[1],
+        )
+
+        target_network_init = make_target_network(
+            target_network_type,
+            num_spatial_dims=num_spatial_dims,
+            in_channels=in_channels,
+            out_channels=in_channels,
+            key=keys[2],
+            **target_network_kwargs,
+        )
+
+        self.hypernetwork_head = HypernetworkHead(
+            in_size=embedding_dim,
+            target_network=target_network_init,
+            num_blocks=blocks_hyper,
+            initialization=hypernet_init,
+            key=keys[3],
+        )
+
+        self.num_spatial_dims = num_spatial_dims
+        self.stack_grid = stack_grid
+        self.embedding_dim = embedding_dim
+        self.activation = activation
+
+    def __call__(
+        self,
+        u: Float[Array, "time channels *grids"],
+        args: tuple[float, float],
+        *,
+        key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
+    ):
+        v: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
+            append_grid_channels
+        )(u)
+
+        context_embed: Float[Array, " embedding_dim"] = self.context_encoder(v, key=key)
+        context_embed = self.hypernetwork_trunk(context_embed)
+        target_network = self.hypernetwork_head(context_embed)
+
+        u0: Float[Array, " channels *grids"] = u[-1]
+        u1: Float[Array, " channels *grids"] = target_network(u0, args)
+
+        return u1, None
+
+
+class HyperNeuralOperatorNew(AbstractMultiphysicsOperator):
+    context_encoder: AbstractEncoder
+    hypernetwork_trunk: eqx.nn.MLP
+    hypernetwork_head: HypernetworkHead[AbstractTargetNetwork]
     lift_operator: eqx.nn.Identity | ChannelwiseMLP
     project_operator: eqx.nn.Identity | ChannelwiseMLP
 
