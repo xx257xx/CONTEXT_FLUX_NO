@@ -10,6 +10,7 @@ import grain
 import h5py
 import jax
 import numpy as np
+import yaml
 from einops import pack, rearrange
 from jaxtyping import Array, Float
 
@@ -31,7 +32,7 @@ IO_PARAMS = {
 
 
 class TheWellDataSource(grain.sources.RandomAccessDataSource):
-    well_base_path: Path | str
+    well_base_path: Path
     well_dataset_name: str
     well_split_name: Literal["train", "valid", "test", None]
     include_filters: list[str]
@@ -54,9 +55,10 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
         exclude_filters: list[str] = [],
         window_size: int = 21,
         downsample_spatial: int = 1,
+        use_normalization: bool = True,  # Only support z-score norm for now
         exclude_field_names: Sequence[str] = [],
     ):
-        self.well_base_path = well_base_path
+        self.well_base_path = Path(well_base_path)
         self.well_dataset_name = well_dataset_name
         self.well_split_name = well_split_name
         self.include_filters = include_filters
@@ -113,6 +115,17 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
             i * downsample_spatial for i in self.metadata_common["spatial_resolution"]
         )
         self.downsample_spatial = downsample_spatial
+
+        # If use_normalization is True, locate stats.yaml and load mean, std
+        self.use_normalization = use_normalization
+        with open(
+            self.well_base_path / self.well_dataset_name / "stats.yaml", "r"
+        ) as f:
+            stats = yaml.safe_load(f)
+        for stat_name in ["mean", "std"]:
+            self.metadata_common[stat_name] = np.concatenate(
+                [np.asarray(x).reshape(-1) for x in stats[stat_name].values()]
+            )
 
     def _check_consistency_and_build_metadata(self):
         """For the individual files in .hdf5, make sure that they have matching fields,
@@ -205,8 +218,11 @@ class TheWellDataSource(grain.sources.RandomAccessDataSource):
                     ]
                     for n in field_names
                 ]
-
-        item = rearrange(pack(fields, self._pack_pattern)[0], "t ... c -> t c ...")
+        item = pack(fields, self._pack_pattern)[0]
+        # normalize if necessary
+        if self.use_normalization:
+            item = (item - self.metadata_common["mean"]) / self.metadata_common["std"]
+        item = rearrange(item, "t ... c -> t c ...")
         return item[..., *self._slice_downsample]
 
     @cached_property

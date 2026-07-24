@@ -149,7 +149,7 @@ class Trainer:
         """Given checkpoint directory and name, return the absolute path to save
         checkpoints in."""
         now = datetime.datetime.now()
-        now_str = now.strftime("%y-%m-%d-%H:%M:%S")
+        now_str = now.strftime("%y-%m-%d-%H_%M_%S")
         if checkpoint_name is None:
             checkpoint_name = ""
 

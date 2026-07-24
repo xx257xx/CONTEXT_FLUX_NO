@@ -30,7 +30,7 @@ def main(cfg: DictConfig) -> None:
         "train",
         window_size=segment_length,
         downsample_spatial=cfg.data.downsample_spatial,
-        exclude_field_names=cfg.data.exclude_field_names,
+        use_normalization=cfg.data.use_normalization,
     )
     loader_train = grain.DataLoader(
         data_source=source_train,
@@ -45,7 +45,7 @@ def main(cfg: DictConfig) -> None:
         "valid",
         window_size=segment_length,
         downsample_spatial=cfg.data.downsample_spatial,
-        exclude_field_names=cfg.data.exclude_field_names,
+        use_normalization=cfg.data.use_normalization,
     )
     loader_valid = grain.DataLoader(
         data_source=source_valid,
