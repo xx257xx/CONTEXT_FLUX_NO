@@ -357,3 +357,202 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         df = jnp.diff(f, axis=1)
         df = jnp.swapaxes(df, spatial_axis + 1, 1)
         return df
+
+
+class ContextConditionedFluxModel(eqx.Module):
+    in_channels: int = eqx.field(static=True)
+    out_channels: int = eqx.field(static=True)
+    stencil_widths: tuple[int, int] = eqx.field(static=True)
+    lift_dim: int = eqx.field(static=True)
+    hidden_dim: int = eqx.field(static=True)
+    depth: int = eqx.field(static=True)
+    context_size: int = eqx.field(static=True)
+
+    lift_layer: eqx.nn.Conv1d
+    mlp: eqx.nn.MLP
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        stencil_widths: tuple[int, int],
+        lift_dim: int,
+        hidden_dim: int,
+        depth: int,
+        context_size: int,
+        dtype=None,
+        *,
+        key: PRNGKeyArray,
+    ):
+        keys = jax.random.split(key, 2)
+        kernel_size = stencil_widths[0] + stencil_widths[1] + 1
+        self.lift_layer = eqx.nn.Conv1d(
+            in_channels=in_channels,
+            out_channels=lift_dim,
+            kernel_size=kernel_size,
+            dtype=dtype,
+            key=keys[0],
+        )
+        self.mlp = eqx.nn.MLP(
+            in_size=lift_dim + context_size,
+            out_size=out_channels,
+            width_size=hidden_dim,
+            depth=depth,
+            activation=jax.nn.gelu,
+            dtype=dtype,
+            key=keys[1],
+        )
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.stencil_widths = stencil_widths
+        self.lift_dim = lift_dim
+        self.hidden_dim = hidden_dim
+        self.depth = depth
+        self.context_size = context_size
+
+    @property
+    def stencil_size(self) -> int:
+        return sum(self.stencil_widths) + 1
+
+    def __call__(
+        self,
+        u: Float[Array, "in_channels grids"],
+        context: Float[Array, " context_size"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ) -> Float[Array, "out_channels grids+1"]:
+        a, b = self.stencil_widths
+        pad_widths = [(0, 0), (a + 1, b)]
+        # Need to change mode if not periodic boundary condition
+        u_padded = jnp.pad(u, pad_widths, mode="wrap")
+        u_stencils: Float[Array, "lift_dim grids_x+1"] = self.lift_layer(u_padded)
+
+        context = jnp.broadcast_to(jnp.expand_dims(context, axis=-1), u_stencils.shape)
+        u_stencils: Float[Array, "lift_dim+context_size grids_x+1"] = jnp.concatenate(
+            (context, u_stencils), axis=0
+        )
+        f: Float[Array, "out_channels grids_x+1"] = eqx.filter_vmap(
+            self.mlp, in_axes=-1, out_axes=-1
+        )(u_stencils)
+        return f
+
+
+class ContextAppendedFluxNO(AbstractMultiphysicsOperator):
+    context_encoder: AbstractEncoder
+    hypernetwork_trunk: eqx.nn.MLP
+    fluxes: tuple[ContextConditionedFluxModel, ...]
+
+    num_spatial_dims: int = eqx.field(static=True)
+    lift_dim: int = eqx.field(static=True)
+    embedding_dim: int = eqx.field(static=True)
+    stencil_size: tuple[int, int] = eqx.field(static=True)
+    boundary_condition: Literal["periodic"] = eqx.field(static=True)
+    stack_grid: bool = eqx.field(static=True)
+    activation: Callable = eqx.field(static=True)
+
+    def __init__(
+        self,
+        num_spatial_dims: int,
+        in_channels: int,
+        in_timesteps: int | None,
+        embedding_dim: int,
+        encoder_type: Literal["ViT", "DPOT", "TRecViT"],
+        encoder_kwargs: dict[str, Any],
+        depth: int,
+        lift_dim: int,
+        stencil_size: int | tuple[int, int],
+        width_flux: int = 128,
+        width_hyper: int = 128,
+        depth_hyper: int = 1,
+        activation: Callable = jax.nn.gelu,
+        stack_grid: bool = True,
+        boundary_condition: Literal["periodic"] = "periodic",
+        dtype=None,
+        *,
+        key: PRNGKeyArray,
+    ):
+        self.stencil_size = (
+            (stencil_size, stencil_size)
+            if isinstance(stencil_size, int)
+            else stencil_size
+        )
+        self.boundary_condition = boundary_condition
+
+        keys = jax.random.split(key, 3)
+
+        self.context_encoder = make_encoder(
+            encoder_type,
+            num_spatial_dims=num_spatial_dims,
+            in_channels=in_channels + num_spatial_dims if stack_grid else in_channels,
+            embedding_dim=embedding_dim,
+            in_timesteps=in_timesteps,
+            key=keys[0],
+            **encoder_kwargs,
+        )
+
+        self.hypernetwork_trunk = eqx.nn.MLP(
+            in_size=embedding_dim,
+            out_size=embedding_dim,
+            width_size=width_hyper,
+            depth=depth_hyper,
+            activation=activation,
+            key=keys[1],
+        )
+
+        fluxes = []
+        for i in range(num_spatial_dims):  # Need a flux model per spatial dimension
+            key_f=jax.random.fold_in(keys[2], i)
+            fluxes.append(ContextConditionedFluxModel(in_channels=in_channels + num_spatial_dims,
+                            out_channels=in_channels,
+                            stencil_widths=self.stencil_size,
+                            lift_dim=lift_dim,
+                            hidden_dim=width_flux,
+                            depth=depth,
+                            context_size=embedding_dim, 
+                            dtype=dtype,
+                            key=key_f,))
+       
+        self.fluxes = tuple(fluxes)
+
+        self.num_spatial_dims = num_spatial_dims
+        self.stack_grid = stack_grid
+        self.lift_dim = lift_dim
+        self.embedding_dim = embedding_dim
+        self.activation = activation
+
+    def __call__(
+        self,
+        u: Float[Array, "time channels *grids"],
+        args: tuple[float, float],
+        *,
+        key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
+    ):
+        dt, *dxs = args
+
+        v: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
+            append_grid_channels
+        )(u)
+
+        context_embed: Float[Array, " embedding_dim"] = self.context_encoder(v, key=key)
+        context_embed = self.hypernetwork_trunk(context_embed)
+
+        u0: Float[Array, " channels *grids"] = u[-1]
+        # Add flux for each spatial dimension
+        for i, (flux_model, dx) in enumerate(zip(self.fluxes, dxs)):
+            df = self._apply_flux(flux_model, v[-1], context_embed, i)
+
+            u0 = u0 - dt * df / dx
+
+        return u0, None
+
+    def _apply_flux(
+        self, flux, v: Float[Array, " in_channels *grids"], context, spatial_axis: int
+    ) -> Float[Array, " out_channels *grids"]:
+        v = jnp.swapaxes(v, spatial_axis + 1, 1)
+        v_, ps = pack([v], "C S *")
+        f_ = eqx.filter_vmap(flux, in_axes=(-1, None), out_axes=-1)(v_, context)
+        f = unpack(f_, ps, "C S *")[0]
+        df = jnp.diff(f, axis=1)
+        df = jnp.swapaxes(df, spatial_axis + 1, 1)
+        return df
