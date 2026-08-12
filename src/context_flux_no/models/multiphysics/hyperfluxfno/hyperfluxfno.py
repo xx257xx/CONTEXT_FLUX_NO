@@ -165,6 +165,8 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
             """dx for all spatial dimensions must be provided"""
         )
 
+ 
+
         v: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
             append_grid_channels
         )(u)
@@ -187,6 +189,22 @@ class HyperFluxFNO(AbstractMultiphysicsOperator):
             u0 = u0 + dt * (flux_model(v_l) - flux_model(v_r)) / dx
 
         return u0, None
+
+    def encode_context(
+        self,
+        u: Float[Array, "time channels *grids"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ):
+        v = jax.vmap(append_grid_channels)(u)
+    
+        encoder_embedding = self.context_encoder(v, key=key)
+        hyper_embedding = self.hypernetwork_trunk(encoder_embedding)
+    
+        return {
+            "encoder_embedding": encoder_embedding,
+            "hyper_embedding": hyper_embedding,
+        }
 
 
 class FluxModel(eqx.Module):
@@ -377,6 +395,8 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
 
             u0 = u0 - dt * df / dx
 
+
+
         return u0, None
 
     def _apply_flux(
@@ -389,3 +409,94 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
         df = jnp.diff(f, axis=1)
         df = jnp.swapaxes(df, spatial_axis + 1, 1)
         return df
+    
+    def encode_context(
+        self,
+        u: Float[Array, "time channels *grids"],
+        args: Any,
+        num_steps: int,
+        *,
+        key: PRNGKeyArray | None = None,
+        inference: bool | None = None,
+    ) -> Float[Array, "{num_steps} embedding_dim"]:
+        """Autoregressive rollout 과정에서 각 step의 context embedding을 반환한다.
+    
+        입력 형식은 rollout과 동일하다.
+    
+        Returns:
+            embeddings:
+                shape = (num_steps, embedding_dim)
+        """
+    
+        if key is None:
+            encode_keys = None
+            rollout_keys = None
+        else:
+            keys = jax.random.split(key, 2 * num_steps)
+            encode_keys = keys[:num_steps]
+            rollout_keys = keys[num_steps:]
+    
+        def _scan_fn(
+            u_in: Float[Array, "time channels *grids"],
+            keys_: tuple[PRNGKeyArray, PRNGKeyArray] | None,
+        ) -> tuple[
+            Float[Array, "time channels *grids"],
+            Float[Array, "embedding_dim"],
+        ]:
+            if keys_ is None:
+                encode_key = None
+                rollout_key = None
+            else:
+                encode_key, rollout_key = keys_
+    
+            # __call__과 동일한 입력 전처리
+            v: Float[
+                Array,
+                "time channels+num_spatial_dims *grids",
+            ] = jax.vmap(append_grid_channels)(u_in)
+    
+            # Encoder 출력
+            context_embedding: Float[
+                Array, "embedding_dim"
+            ] = self.context_encoder(
+                v,
+                key=encode_key,
+                inference=inference,
+            )
+    
+            # Hypernetwork head에 실제로 들어가는 embedding
+            hyper_embedding: Float[
+                Array, "embedding_dim"
+            ] = self.hypernetwork_trunk(context_embedding)
+    
+            # 다음 autoregressive 입력을 만들기 위한 예측
+            u_out, _ = self(
+                u_in,
+                args,
+                key=rollout_key,
+                inference=inference,
+            )
+    
+            u_in_next = jnp.concatenate(
+                (
+                    u_in[1:],
+                    jnp.expand_dims(u_out, axis=0),
+                ),
+                axis=0,
+            )
+    
+            return u_in_next, hyper_embedding
+    
+        if key is None:
+            scan_xs = None
+        else:
+            scan_xs = (encode_keys, rollout_keys)
+    
+        _, embeddings = jax.lax.scan(
+            _scan_fn,
+            u,
+            xs=scan_xs,
+            length=num_steps,
+        )
+    
+        return embeddings

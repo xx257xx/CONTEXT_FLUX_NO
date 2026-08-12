@@ -7,7 +7,16 @@ from .base import AbstractEncoder
 from .dpot_encoder import DPOTEncoder
 from .trecvit_encoder import TRecViTEncoder
 from .vit_encoder import ViTEncoder
+import jax.nn as jnn
 
+def _get_activation(name: str):
+    if name.startswith("jax.nn."):
+        name = name.removeprefix("jax.nn.")
+
+    if not hasattr(jnn, name):
+        raise ValueError(f"Unknown activation function: {name}")
+
+    return getattr(jnn, name)
 
 def make_encoder(
     encoder_type: Literal["ViT", "DPOT", "TRecViT"],
@@ -21,6 +30,13 @@ def make_encoder(
 ) -> AbstractEncoder:
     match encoder_type:
         case "ViT":
+            encoder_kwargs = dict(encoder_kwargs)
+
+            activation = encoder_kwargs.get("activation")
+
+            if isinstance(activation, str):
+
+                encoder_kwargs["activation"] = _get_activation(activation)
             if num_spatial_dims != 1:
                 raise ValueError("ViTEncoder is only supported for num_spatial_dims=1")
             if in_timesteps is not None:
