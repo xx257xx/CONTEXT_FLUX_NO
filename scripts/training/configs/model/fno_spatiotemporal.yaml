@@ -1,0 +1,11 @@
+_target_: context_flux_no.models.multiphysics.SpatiotemporalFNO
+num_spatial_dims: ${..data.num_spatial_dims}
+channels: ${..data.channels}
+lift_dim: 128
+depth: 2
+frequency_modes: [3,12]
+width_lift: ${.lift_dim}
+width_project: ${.lift_dim}
+key:
+  _target_: jax.random.key
+  seed: 0

@@ -145,12 +145,15 @@ def generate_circulant_embedding_method_1d(
 class GaussianRandomField1D(eqx.Module):
     covariance_fn: AbstractCovarianceFn
 
-    def sample(self, x: Float[Array, " Nx"], key: PRNGKeyArray) -> Float[Array, " Nx"]:
+    def sample(self, x: Float[Array, " Nx"], key: PRNGKeyArray) -> Float[Array, "1 Nx"]:
         """Sample from the gaussian random field.
 
         Assume that the x coordinates are equispaced."""
-        return generate_circulant_embedding_method_1d(
-            len(x), x[1] - x[0], self.covariance_fn, key=key
+        return jnp.expand_dims(
+            generate_circulant_embedding_method_1d(
+                len(x), x[1] - x[0], self.covariance_fn, key=key
+            ),
+            axis=0,
         )
 
 

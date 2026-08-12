@@ -1,0 +1,16 @@
+defaults:
+ - hyperfluxno_base
+
+encoder_type: ViT
+encoder_kwargs:
+    patch_size: [4, 4]
+    num_heads: 8
+    num_layers: 3
+    dropout: 0.0
+    hidden_dim: 64
+    num_hidden_patch: 1
+    activation:
+      _target_: hydra.utils.get_method
+      path: jax.nn.gelu
+
+  

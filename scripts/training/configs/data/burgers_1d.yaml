@@ -1,0 +1,6 @@
+name: burgers_1d
+num_spatial_dims: 1
+channels: 1
+loadpath_train: ./data/datasets/burgers_1d/data/train
+loadpath_valid: ./data/datasets/burgers_1d/data/valid/burgers_1d_validation_grf_seed=11.hdf5
+max_train_time_index: 80

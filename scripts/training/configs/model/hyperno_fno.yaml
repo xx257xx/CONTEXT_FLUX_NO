@@ -1,0 +1,12 @@
+defaults:
+ - hyperno_base
+
+target_network_type: FNO
+target_network_kwargs:
+  frequency_modes: 8
+  lift_dim: 48
+  depth: 4
+  width_lift: 48
+  width_project: 48
+
+  

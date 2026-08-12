@@ -67,14 +67,32 @@ class PeriodicRandomStepFunction1D(eqx.Module):
     value_min: float = eqx.field(static=True, default=-1.0)
     value_max: float = eqx.field(static=True, default=1.0)
 
-    def sample(
-        self, x: Float[Array, " Nx"], key: PRNGKeyArray
-    ) -> Float[Array, " Nx"]:
-        return generate_periodic_random_step_function_1d(
-            x,
-            key,
-            num_jumps_min=self.num_jumps_min,
-            num_jumps_max=self.num_jumps_max,
-            value_min=self.value_min,
-            value_max=self.value_max,
+    def sample(self, x: Float[Array, " Nx"], key: PRNGKeyArray) -> Float[Array, " Nx"]:
+        return jnp.expand_dims(
+            generate_periodic_random_step_function_1d(
+                x,
+                key,
+                num_jumps_min=self.num_jumps_min,
+                num_jumps_max=self.num_jumps_max,
+                value_min=self.value_min,
+                value_max=self.value_max,
+            ),
+            axis=0,
+        )
+
+
+class MultichannelWaveform(eqx.Module):
+    waveforms: tuple
+
+    def __init__(self, waveforms):
+        self.waveforms = tuple(waveforms)
+
+    @property
+    def channels(self) -> int:
+        return len(self.waveforms)
+
+    def sample(self, x: Float[Array, " Nx"], key: PRNGKeyArray) -> Float[Array, "C Nx"]:
+        keys = jax.random.split(key, self.channels)
+        return jnp.concatenate(
+            [wave.sample(x, k) for wave, k in zip(self.waveforms, keys)], axis=0
         )

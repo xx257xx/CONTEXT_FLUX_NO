@@ -1,0 +1,48 @@
+[project]
+name = "icon-repro"
+version = "0.1.0"
+description = "Reproduction environment for ICON with JAX(CUDA11) and PyTorch(CUDA11.8)"
+requires-python = "==3.11.*"  # Dockerfile의 Ubuntu 22.04 기본 파이썬 버전에 맞춤
+dependencies = [
+    "numpy",
+    "scipy",
+    "absl-py",
+    "dm-haiku",
+    "flax",
+    "einops",
+    "einshape",
+    "jupyter",
+    "matplotlib",
+    "opt-einsum",
+    "optax",
+    "tensorflow",
+    "pytz",
+    "tqdm",
+    "gymnasium",
+    "gymnax",
+    "brax",
+    "pgx",
+    "jumanji",
+    "evosax",
+    "distrax",
+    "transformers",
+    # Dockerfile의 JAX 설정 (cuda11_pip 옵션)
+    "jax[cuda13]>=0.7",
+    # Dockerfile의 PyTorch 설정
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "jaxlib>=0.5",
+]
+
+[tool.uv]
+# JAX 설치를 위한 링크 (Dockerfile의 -f 옵션 대응)
+find-links = [
+    "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+]
+
+# PyTorch 설치를 위한 인덱스 (Dockerfile의 --index-url 대응)
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = false  # PyTorch 패키지를 여기서 우선적으로 찾도록 허용

@@ -149,7 +149,7 @@ class Trainer:
         """Given checkpoint directory and name, return the absolute path to save
         checkpoints in."""
         now = datetime.datetime.now()
-        now_str = now.strftime("%y-%m-%d-%H:%M:%S")
+        now_str = now.strftime("%y-%m-%d-%H_%M_%S")
         if checkpoint_name is None:
             checkpoint_name = ""
 
@@ -219,16 +219,18 @@ class Trainer:
         training step."""
         batch_iterator = iter(zip(train_dataloader, validation_dataloader))
 
-        while int(state.step) < num_steps:
-            try:
-                batches: tuple[Batch, Batch | None] = next(batch_iterator)
-            except StopIteration:
-                # Train and/or validation dataloader exhausted
-                break
-
-            output = self.train_step(state, *batches, loss_args)
-            state = output.trainer_state
-            yield output
+        try:
+            while int(state.step) < num_steps:
+                try:
+                    batches: tuple[Batch, Batch | None] = next(batch_iterator)
+                except StopIteration:
+                    # Train and/or validation dataloader exhausted
+                    break
+                output = self.train_step(state, *batches, loss_args)
+                state = output.trainer_state
+                yield output
+        finally:
+            del batch_iterator
 
     @cached_property
     def train_step(

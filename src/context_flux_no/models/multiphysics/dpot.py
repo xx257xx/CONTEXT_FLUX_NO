@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import equinox as eqx
@@ -278,10 +279,10 @@ class DPOT(AbstractMultiphysicsOperator):
             raise ValueError(
                 "Input array channel dimension does not match self.in_channels"
             )
-        if u.shape[2:] != self.grid_size:
-            raise ValueError(
-                "Input array spatial dimensions do not match self.grid_size"
-            )
+        # if u.shape[2:] != self.grid_size:
+        #     raise ValueError(
+        #         "Input array spatial dimensions do not match self.grid_size"
+        #     )
 
         u: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
             append_grid_channels
@@ -294,7 +295,7 @@ class DPOT(AbstractMultiphysicsOperator):
 
         # Apply positional embedding
         v: Float[Array, "time channels_embed *patches"] = eqx.filter_vmap(
-            self.position_embedding
+            partial(self.position_embedding, resize=True)
         )(v)
 
         # Time aggregation layer

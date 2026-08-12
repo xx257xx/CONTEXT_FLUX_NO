@@ -1,0 +1,8 @@
+name: step
+waveform:
+  _target_: context_flux_no.waveforms.step.MultichannelWaveform
+  _args_:
+    - _target_: context_flux_no.waveforms.step.PeriodicRandomStepFunction1D
+      value_min: 0.5
+      value_max: 2.5
+    - _target_: context_flux_no.waveforms.step.PeriodicRandomStepFunction1D

@@ -1,6 +1,6 @@
 defaults:
 - data: cubicflux_1d
-- model: hyperfluxfno
+- model: hyperfluxno
 - training: default
 - loss_fn: vanilla
 - override hydra/launcher: submitit_slurm

@@ -1,0 +1,10 @@
+_target_: context_flux_no.models.multiphysics.NaiveFluxNO
+num_spatial_dims: ${..data.num_spatial_dims}
+channels: ${..data.channels}
+lift_dim: 512
+depth: 6
+stencil_widths: [10,10]
+hidden_dim: 512
+key:
+  _target_: jax.random.key
+  seed: 0

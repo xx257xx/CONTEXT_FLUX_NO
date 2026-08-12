@@ -64,7 +64,7 @@ def generate_dataset(
                     verbose=False,
                 )
                 solutions.append(sol)
-            except Exception:
+            except Exception as e:
                 continue
         solutions_all.append(xr.concat(solutions, "ic", data_vars="minimal"))
     return xr.concat(solutions_all, "ic")  # "pde")

@@ -64,6 +64,7 @@ class HypernetworkHead[NN: eqx.Module](eqx.Module):
 
         linears = []
         unflatten_fns = []
+        # Handle floating and complex parameters separately
         for target_, k in zip(eqx.partition(target_params, is_floating_array), keys):
             l, unflat_fn = self._make_linear_layer(target_, initialization, key=k)
             linears.append(l)
