@@ -38,6 +38,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "wandb>=0.22.3",
     "xarray>=2025.7.0",
+    "zarr>=3.3.0",
 ]
 
 [project.scripts]
