@@ -4,8 +4,8 @@ from typing import Any, TypeAlias
 from jaxtyping import Array, Complex, Float, Int, PyTree
 
 
-IntScalar:TypeAlias = Int[Array, ""]
-FloatScalar:TypeAlias = Float[Array, ""]
+IntScalar: TypeAlias = Int[Array, ""]
+FloatScalar: TypeAlias = Float[Array, ""]
 
 FloatArray: TypeAlias = Float[Array, "..."]
 ComplexArray: TypeAlias = Complex[Array, "..."]

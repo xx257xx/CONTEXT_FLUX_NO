@@ -56,15 +56,15 @@ class ZarrWellDataset:
         time_arr = dimensions.create_array(
             name="time", shape=(Nt + 1,), dtype=self.dtype
         )
-        time_arr[:] = np.linspace(*t_span, Nt+1, endpoint=True)
+        time_arr[:] = np.linspace(*t_span, Nt + 1, endpoint=True)
         time_arr.attrs["sample_varying"] = False
 
         for space_name, x_span, Nx in zip(spatial_dim_names, x_spans, Nxs):
             space_arr = dimensions.create_array(
                 name=space_name, shape=(Nx,), dtype=self.dtype
             )
-            x_grid = np.linspace(*x_span, Nx+1, endpoint=True)
-            space_arr[:] = 0.5*(x_grid[:-1]+x_grid[1:]) # Cell centers
+            x_grid = np.linspace(*x_span, Nx + 1, endpoint=True)
+            space_arr[:] = 0.5 * (x_grid[:-1] + x_grid[1:])  # Cell centers
             space_arr.attrs["sample_varying"] = False
             space_arr.attrs["time_varying"] = False
 

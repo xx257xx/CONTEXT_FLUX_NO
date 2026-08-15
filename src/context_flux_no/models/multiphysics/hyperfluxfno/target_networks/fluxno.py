@@ -90,7 +90,8 @@ class FluxNOTargetNetwork(AbstractTargetNetwork):
 
     fluxes: tuple[NeuralNetworkFlux]
 
-    def __init__(self,
+    def __init__(
+        self,
         num_spatial_dims: int,
         in_channels: int,
         out_channels: int,

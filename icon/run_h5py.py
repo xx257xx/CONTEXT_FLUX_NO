@@ -10,6 +10,7 @@
 # ------------------------------------------------------------
 
 import os
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import inspect
@@ -21,6 +22,7 @@ import pickle
 import pytz
 import numpy as np
 import tensorflow as tf
+
 tf.config.set_visible_devices([], device_type="GPU")
 
 import jax
@@ -100,14 +102,20 @@ class Runner:
         self.loss_batch_fn = jax.jit(
             jax.vmap(self.loss_fn, in_axes=[None, None, 0, 0, 0, 0, 0], out_axes=0)
         )
-        self.loss_batch_ave_fn = jax.jit(lambda *args, **kwargs: jnp.mean(self.loss_batch_fn(*args, **kwargs)))
+        self.loss_batch_ave_fn = jax.jit(
+            lambda *args, **kwargs: jnp.mean(self.loss_batch_fn(*args, **kwargs))
+        )
 
         # multi-device (pmap)
         self.params = jax.device_put_replicated(self.params, devices)
         self.opt_state = jax.device_put_replicated(self.opt_state, devices)
-        self.predict_pmap_batch_fn = jax.pmap(self.predict_batch_fn, axis_name="devices")
+        self.predict_pmap_batch_fn = jax.pmap(
+            self.predict_batch_fn, axis_name="devices"
+        )
         self.loss_pmap_batch_fn = jax.pmap(self.loss_batch_fn, axis_name="devices")
-        self.loss_pmap_batch_ave_fn = jax.pmap(self.loss_batch_ave_fn, axis_name="devices")
+        self.loss_pmap_batch_ave_fn = jax.pmap(
+            self.loss_batch_ave_fn, axis_name="devices"
+        )
         self.train_iter = utils.get_train_iter_pmap(self.loss_batch_ave_fn, optimizer)
 
         self.train_step = 0
@@ -149,16 +157,27 @@ class Runner:
 
     def iter(self, prompt, mask, query, query_mask, ground_truth, use_list=False):
         self.params, self.opt_state = self.train_iter(
-            self.params, self.next_key(), self.opt_state, prompt, mask, query, query_mask, ground_truth
+            self.params,
+            self.next_key(),
+            self.opt_state,
+            prompt,
+            mask,
+            query,
+            query_mask,
+            ground_truth,
         )
         self.train_step += 1
 
     def get_loss(self, prompt, mask, query, query_mask, ground_truth, use_list=False):
-        losses = self.loss_pmap_batch_fn(self.params, self.next_key(), prompt, mask, query, query_mask, ground_truth)
+        losses = self.loss_pmap_batch_fn(
+            self.params, self.next_key(), prompt, mask, query, query_mask, ground_truth
+        )
         return losses
 
     def get_pred(self, prompt, mask, query, use_list=False):
-        pred = self.predict_pmap_batch_fn(self.params, self.next_key(), prompt, mask, query)
+        pred = self.predict_pmap_batch_fn(
+            self.params, self.next_key(), prompt, mask, query
+        )
         return pred
 
 
@@ -166,16 +185,26 @@ def run_train():
     stamp = datetime.now(pytz.timezone("America/Los_Angeles")).strftime("%Y%m%d-%H%M%S")
     print("stamp:", stamp, flush=True)
 
-    train_warmup_steps = FLAGS.epochs * FLAGS.steps_per_epoch * FLAGS.train_warmup_percent // 100
-    train_decay_steps = FLAGS.epochs * FLAGS.steps_per_epoch * FLAGS.train_decay_percent // 100
+    train_warmup_steps = (
+        FLAGS.epochs * FLAGS.steps_per_epoch * FLAGS.train_warmup_percent // 100
+    )
+    train_decay_steps = (
+        FLAGS.epochs * FLAGS.steps_per_epoch * FLAGS.train_decay_percent // 100
+    )
     print("train_warmup_steps =", train_warmup_steps, flush=True)
     print("train_decay_steps  =", train_decay_steps, flush=True)
 
     train_data_dirs = FLAGS.train_data_dirs
-    test_data_dirs = FLAGS.train_data_dirs if FLAGS.test_data_dirs is None else FLAGS.test_data_dirs
+    test_data_dirs = (
+        FLAGS.train_data_dirs if FLAGS.test_data_dirs is None else FLAGS.test_data_dirs
+    )
 
-    train_file_names = [f"{d}/{g}" for d in train_data_dirs for g in FLAGS.train_data_globs]
-    test_file_names = [f"{d}/{g}" for d in test_data_dirs for g in FLAGS.test_data_globs]
+    train_file_names = [
+        f"{d}/{g}" for d in train_data_dirs for g in FLAGS.train_data_globs
+    ]
+    test_file_names = [
+        f"{d}/{g}" for d in test_data_dirs for g in FLAGS.test_data_globs
+    ]
 
     print("train_file_names:", flush=True)
     pprint(train_file_names)
@@ -183,7 +212,11 @@ def run_train():
     pprint(test_file_names)
 
     train_config = load_json(FLAGS.train_config_filename)
-    test_config = train_config if FLAGS.test_config_filename is None else load_json(FLAGS.test_config_filename)
+    test_config = (
+        train_config
+        if FLAGS.test_config_filename is None
+        else load_json(FLAGS.test_config_filename)
+    )
 
     print("train_config:", flush=True)
     pprint(train_config)
@@ -244,10 +277,18 @@ def run_train():
     )
 
     # Example batch
-    exm_equation, exm_prompt, exm_mask, exm_query, exm_query_mask, exm_ground_truth, dummy = train_data.get_next_data(
-        decode_equation=True, list_size=0
+    (
+        exm_equation,
+        exm_prompt,
+        exm_mask,
+        exm_query,
+        exm_query_mask,
+        exm_ground_truth,
+        dummy,
+    ) = train_data.get_next_data(decode_equation=True, list_size=0)
+    train_data.pretty_print(
+        exm_equation, exm_prompt, exm_mask, exm_query, exm_query_mask, exm_ground_truth
     )
-    train_data.pretty_print(exm_equation, exm_prompt, exm_mask, exm_query, exm_query_mask, exm_ground_truth)
 
     runner = Runner(
         seed=FLAGS.seed,
@@ -287,7 +328,6 @@ def run_train():
             pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
         print(f"[CKPT] saved: {path}", flush=True)
 
-
     utils.timer.tic("since last print")
 
     total_steps = FLAGS.epochs * FLAGS.steps_per_epoch
@@ -297,13 +337,21 @@ def run_train():
             utils.timer.toc("since last print")
             utils.timer.tic("since last print")
 
-            _, prompt, mask, query, query_mask, ground_truth, dummy = train_data.get_next_data(list_size=FLAGS.list_size)
+            _, prompt, mask, query, query_mask, ground_truth, dummy = (
+                train_data.get_next_data(list_size=FLAGS.list_size)
+            )
             train_loss = runner.get_loss(prompt, mask, query, query_mask, ground_truth)
-            train_loss_mean = float(jnp.mean(train_loss)); train_loss_std = float(jnp.std(train_loss))
+            train_loss_mean = float(jnp.mean(train_loss))
+            train_loss_std = float(jnp.std(train_loss))
 
-            equation, prompt_t, mask_t, query_t, query_mask_t, ground_truth_t, dummy   = test_data.get_next_data(decode_equation=True, list_size=FLAGS.list_size)
-            test_loss = runner.get_loss(prompt_t, mask_t, query_t, query_mask_t, ground_truth_t)
-            test_loss_mean = float(jnp.mean(test_loss)); test_loss_std = float(jnp.std(test_loss))
+            equation, prompt_t, mask_t, query_t, query_mask_t, ground_truth_t, dummy = (
+                test_data.get_next_data(decode_equation=True, list_size=FLAGS.list_size)
+            )
+            test_loss = runner.get_loss(
+                prompt_t, mask_t, query_t, query_mask_t, ground_truth_t
+            )
+            test_loss_mean = float(jnp.mean(test_loss))
+            test_loss_std = float(jnp.std(test_loss))
 
             print(
                 f"step: {runner.train_step}, "
@@ -315,8 +363,12 @@ def run_train():
 
             if FLAGS.tfboard:
                 with file_writer.as_default():
-                    tf.summary.scalar("loss/train_loss", train_loss_mean, step=runner.train_step)
-                    tf.summary.scalar("loss/test_loss", test_loss_mean, step=runner.train_step)
+                    tf.summary.scalar(
+                        "loss/train_loss", train_loss_mean, step=runner.train_step
+                    )
+                    tf.summary.scalar(
+                        "loss/test_loss", test_loss_mean, step=runner.train_step
+                    )
 
             # checkpoint save
             if (runner.train_step % FLAGS.ckpt_freq) == 0:
@@ -326,12 +378,14 @@ def run_train():
 
         # plot
         if FLAGS.tfboard and (runner.train_step % FLAGS.plot_freq == 0):
-            equation, prompt, mask, query, query_mask, ground_truth,dummy = test_data.get_next_data(
-                decode_equation=True, list_size=FLAGS.list_size
+            equation, prompt, mask, query, query_mask, ground_truth, dummy = (
+                test_data.get_next_data(decode_equation=True, list_size=FLAGS.list_size)
             )
             pred = runner.get_pred(prompt, mask, query)
 
-            plot_num = FLAGS.plot_num if FLAGS.plot_num is not None else FLAGS.train_batch_size
+            plot_num = (
+                FLAGS.plot_num if FLAGS.plot_num is not None else FLAGS.train_batch_size
+            )
             with file_writer.as_default():
                 for fij in range(plot_num):
                     fi = fij // (FLAGS.train_batch_size // runner.num_devices)
@@ -349,10 +403,14 @@ def run_train():
                         v_dim=FLAGS.v_dim,
                         k_mode=FLAGS.k_mode,
                     )
-                    tf.summary.image(f"test case {fi}-{fj}", fig, step=runner.train_step)
+                    tf.summary.image(
+                        f"test case {fi}-{fj}", fig, step=runner.train_step
+                    )
 
         # training step
-        _, prompt, mask, query, query_mask, ground_truth,dummy = train_data.get_next_data(list_size=FLAGS.list_size)
+        _, prompt, mask, query, query_mask, ground_truth, dummy = (
+            train_data.get_next_data(list_size=FLAGS.list_size)
+        )
         runner.iter(prompt, mask, query, query_mask, ground_truth)
 
         # time estimate (optional)
@@ -386,7 +444,6 @@ if __name__ == "__main__":
     flags.DEFINE_integer("seed", 42, "random seed")
     flags.DEFINE_integer("ckpt_freq", 1000, "checkpoint save frequency (steps)")
 
-
     # ---- dataset paths (paper repro defaults) ----
     flags.DEFINE_list(
         "train_data_dirs",
@@ -398,7 +455,9 @@ if __name__ == "__main__":
         ["cubic_no_source_train_1000_100.hdf5"],
         "filename(s) for training data",
     )
-    flags.DEFINE_list("test_data_dirs", None, "directories of testing data (None -> same as train)")
+    flags.DEFINE_list(
+        "test_data_dirs", None, "directories of testing data (None -> same as train)"
+    )
     flags.DEFINE_list(
         "test_data_globs",
         ["cubic_no_source_train_1000_100.hdf5"],
@@ -406,18 +465,33 @@ if __name__ == "__main__":
     )
 
     # configs (keep your existing jsons)
-    flags.DEFINE_string("train_config_filename", "train_config.json", "config file for training")
-    flags.DEFINE_string("test_config_filename", None, "config file for testing (None -> same as train)")
+    flags.DEFINE_string(
+        "train_config_filename", "train_config.json", "config file for training"
+    )
+    flags.DEFINE_string(
+        "test_config_filename", None, "config file for testing (None -> same as train)"
+    )
 
     # ---- paper pair extraction defaults ----
     flags.DEFINE_float("tau", 0.005, "time gap tau (paper: 0.1)")
     flags.DEFINE_float("t_init_window", 0.4, "starting window for pairs (paper: 0.4)")
-    flags.DEFINE_integer("pairs_per_operator", 10000, "pairs per operator after downsampling (paper: 10000)")
-    flags.DEFINE_enum("direction", "both", ["forward", "backward", "both"], "pair direction (paper-like: both)")
+    flags.DEFINE_integer(
+        "pairs_per_operator",
+        10000,
+        "pairs per operator after downsampling (paper: 10000)",
+    )
+    flags.DEFINE_enum(
+        "direction",
+        "both",
+        ["forward", "backward", "both"],
+        "pair direction (paper-like: both)",
+    )
 
     # ---- in-context setup (paper-like) ----
     flags.DEFINE_integer("demo_num", 20, "number of demos (paper: 5)")
-    flags.DEFINE_integer("cond_len", 100, "tokens per condition function (paper: Nx=100)")
+    flags.DEFINE_integer(
+        "cond_len", 100, "tokens per condition function (paper: Nx=100)"
+    )
     flags.DEFINE_integer("qoi_len", 100, "tokens per QoI function (paper: Nx=100)")
     flags.DEFINE_integer("k_dim", 1, "key dim (paper: x only)")
     flags.DEFINE_integer("v_dim", 1, "value dim (paper: u only)")
@@ -432,7 +506,9 @@ if __name__ == "__main__":
     flags.DEFINE_string("initializer", "glorot_uniform", "initializer")
 
     # ---- training schedule (paper-like) ----
-    flags.DEFINE_integer("train_batch_size", 16, "batch size (paper-like: 8 forward + 8 backward)")
+    flags.DEFINE_integer(
+        "train_batch_size", 16, "batch size (paper-like: 8 forward + 8 backward)"
+    )
     flags.DEFINE_integer("train_shuffle_buffer_size", 1000, "shuffle buffer size")
     flags.DEFINE_float("train_peak_lr", 1e-4, "peak learning rate (paper: 1e-4)")
     flags.DEFINE_float("train_end_lr", 0.0, "ending learning rate (paper: 0)")
@@ -447,7 +523,9 @@ if __name__ == "__main__":
     flags.DEFINE_integer("loss_freq", 1000, "loss print frequency (steps)")
     flags.DEFINE_integer("plot_freq", 10_000, "plot frequency (steps)")
     flags.DEFINE_integer("time_freq", 1000, "time estimate frequency (steps)")
-    flags.DEFINE_integer("list_size", 0, "optional list size to increase effective batch (0=off)")
+    flags.DEFINE_integer(
+        "list_size", 0, "optional list size to increase effective batch (0=off)"
+    )
     flags.DEFINE_integer("plot_num", None, "number of plot cases")
 
     app.run(main)

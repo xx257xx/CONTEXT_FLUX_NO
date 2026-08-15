@@ -19,6 +19,7 @@ def get_loss_args(model: AbstractMultiphysicsOperator, dataset: xr.Dataset):
     dx = float(dataset["x"][1] - dataset["x"][0])
     return (dt, dx)
 
+
 @hydra.main(config_path="./configs", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     # Manually select gpu to run on

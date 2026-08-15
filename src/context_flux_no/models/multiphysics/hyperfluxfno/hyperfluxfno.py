@@ -501,17 +501,21 @@ class ContextAppendedFluxNO(AbstractMultiphysicsOperator):
 
         fluxes = []
         for i in range(num_spatial_dims):  # Need a flux model per spatial dimension
-            key_f=jax.random.fold_in(keys[2], i)
-            fluxes.append(ContextConditionedFluxModel(in_channels=in_channels + num_spatial_dims,
-                            out_channels=in_channels,
-                            stencil_widths=self.stencil_size,
-                            lift_dim=lift_dim,
-                            hidden_dim=width_flux,
-                            depth=depth,
-                            context_size=embedding_dim, 
-                            dtype=dtype,
-                            key=key_f,))
-       
+            key_f = jax.random.fold_in(keys[2], i)
+            fluxes.append(
+                ContextConditionedFluxModel(
+                    in_channels=in_channels + num_spatial_dims,
+                    out_channels=in_channels,
+                    stencil_widths=self.stencil_size,
+                    lift_dim=lift_dim,
+                    hidden_dim=width_flux,
+                    depth=depth,
+                    context_size=embedding_dim,
+                    dtype=dtype,
+                    key=key_f,
+                )
+            )
+
         self.fluxes = tuple(fluxes)
 
         self.num_spatial_dims = num_spatial_dims

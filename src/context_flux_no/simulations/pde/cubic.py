@@ -98,7 +98,7 @@ class CubicFlux1D(AbstractHyperbolicConservationLaw):
             **pdesolve_kwargs,
         )
         return u, t, x_grid
-        #return solution_to_dataset(u, t, (x_grid,), self.parameters)
+        # return solution_to_dataset(u, t, (x_grid,), self.parameters)
 
 
 class CubicFlux2D(eqx.Module):

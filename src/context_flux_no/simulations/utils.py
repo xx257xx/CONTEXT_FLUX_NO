@@ -86,7 +86,7 @@ def generate_dataset(
             try:
                 u, t, x = pde.solve(
                     lambda u0: initial_condition_fn(u0, key_ic),
-                    x_spans[0], # TODO: works only for 1D; need to fix later
+                    x_spans[0],  # TODO: works only for 1D; need to fix later
                     Nxs[0],
                     t_span,
                     Nt,

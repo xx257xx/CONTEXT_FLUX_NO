@@ -18,8 +18,12 @@ def main(cfg: DictConfig) -> None:
             cfg.initial_condition.waveform
         ).sample,
         coeff_range_dict=cfg.pde.coeff_range_dict,
-        x_span=tuple(cfg.x_span),
-        Nx=cfg.Nx,
+        x_spans=[
+            tuple(cfg.x_span),
+        ],
+        Nxs=[
+            cfg.Nx,
+        ],
         t_span=tuple(cfg.t_span),
         Nt=cfg.Nt,
         dataset_type=cfg.dataset_type,

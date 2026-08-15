@@ -11,6 +11,7 @@ from ..fno import FNO
 from .hyperfluxfno.target_networks import FluxNOTargetNetwork
 from .abstract import AbstractMultiphysicsOperator
 
+
 class NaiveFluxNO(AbstractMultiphysicsOperator):
     fluxno: FluxNOTargetNetwork
 
@@ -41,7 +42,7 @@ class NaiveFluxNO(AbstractMultiphysicsOperator):
             stack_grid=stack_grid,
             activation=activation,
             dtype=dtype,
-            key=key
+            key=key,
         )
         self.num_spatial_dims = num_spatial_dims
 

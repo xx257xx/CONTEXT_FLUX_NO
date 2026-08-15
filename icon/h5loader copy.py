@@ -19,14 +19,15 @@ from einshape import jax_einshape as einshape
 # Low-level utilities
 # =========================
 
+
 @dataclass
 class OperatorRecord:
     equation: str
     coeffs: Dict[str, float]
     cond_k: np.ndarray  # (P, Nx, 1)
     cond_v: np.ndarray  # (P, Nx, 1)
-    qoi_k: np.ndarray   # (P, Nx, 1)
-    qoi_v: np.ndarray   # (P, Nx, 1)
+    qoi_k: np.ndarray  # (P, Nx, 1)
+    qoi_v: np.ndarray  # (P, Nx, 1)
 
 
 def _find_first(f: h5py.File, candidates) -> Optional[h5py.Dataset]:
@@ -42,7 +43,7 @@ def _infer_dt_stride(t: np.ndarray, tau: float) -> Tuple[float, int]:
     stride = int(round(tau / dt))
     if not np.isclose(stride * dt, tau, rtol=0, atol=1e-10):
         raise ValueError(
-            f"tau/dt must be integer. dt={dt}, tau={tau}, stride={stride}, stride*dt={stride*dt}"
+            f"tau/dt must be integer. dt={dt}, tau={tau}, stride={stride}, stride*dt={stride * dt}"
         )
     return dt, stride
 
@@ -83,10 +84,10 @@ def _one_hot(idx: int, K: int) -> np.ndarray:
 def _build_prompt_and_mask_numpy(
     demo_cond_k: np.ndarray,  # (demo_num, cond_len, k_dim)
     demo_cond_v: np.ndarray,  # (demo_num, cond_len, v_dim)
-    demo_qoi_k: np.ndarray,   # (demo_num, qoi_len, k_dim)
-    demo_qoi_v: np.ndarray,   # (demo_num, qoi_len, v_dim)
-    quest_cond_k: np.ndarray, # (1, cond_len, k_dim)
-    quest_cond_v: np.ndarray, # (1, cond_len, v_dim)
+    demo_qoi_k: np.ndarray,  # (demo_num, qoi_len, k_dim)
+    demo_qoi_v: np.ndarray,  # (demo_num, qoi_len, v_dim)
+    quest_cond_k: np.ndarray,  # (1, cond_len, k_dim)
+    quest_cond_v: np.ndarray,  # (1, cond_len, v_dim)
     demo_num: int,
     cond_len: int,
     qoi_len: int,
@@ -102,11 +103,17 @@ def _build_prompt_and_mask_numpy(
 
     # demo blocks
     for i in range(demo_num):
-        cond_index = np.tile(_one_hot(i, index_dim)[None, :], (cond_len, 1))      # (cond_len, demo_num+1)
-        qoi_index  = -np.tile(_one_hot(i, index_dim)[None, :], (qoi_len, 1))     # (qoi_len, demo_num+1)
+        cond_index = np.tile(
+            _one_hot(i, index_dim)[None, :], (cond_len, 1)
+        )  # (cond_len, demo_num+1)
+        qoi_index = -np.tile(
+            _one_hot(i, index_dim)[None, :], (qoi_len, 1)
+        )  # (qoi_len, demo_num+1)
 
-        demo_cond_i = np.concatenate([demo_cond_k[i], demo_cond_v[i], cond_index], axis=-1)
-        demo_qoi_i  = np.concatenate([demo_qoi_k[i],  demo_qoi_v[i],  qoi_index],  axis=-1)
+        demo_cond_i = np.concatenate(
+            [demo_cond_k[i], demo_cond_v[i], cond_index], axis=-1
+        )
+        demo_qoi_i = np.concatenate([demo_qoi_k[i], demo_qoi_v[i], qoi_index], axis=-1)
 
         prompt_list.append(demo_cond_i)
         prompt_list.append(demo_qoi_i)
@@ -116,13 +123,17 @@ def _build_prompt_and_mask_numpy(
 
     # quest condition block
     quest_index = np.tile(_one_hot(demo_num, index_dim)[None, :], (cond_len, 1))
-    quest_cond = np.concatenate([quest_cond_k[0], quest_cond_v[0], quest_index], axis=-1)
+    quest_cond = np.concatenate(
+        [quest_cond_k[0], quest_cond_v[0], quest_index], axis=-1
+    )
 
     prompt_list.append(quest_cond)
     mask_list.append(np.ones((cond_len,), dtype=bool))
 
-    prompt = np.concatenate(prompt_list, axis=0).astype(np.float32)  # (prompt_len, prompt_dim)
-    prompt_mask = np.concatenate(mask_list, axis=0)                  # (prompt_len,)
+    prompt = np.concatenate(prompt_list, axis=0).astype(
+        np.float32
+    )  # (prompt_len, prompt_dim)
+    prompt_mask = np.concatenate(mask_list, axis=0)  # (prompt_len,)
 
     # apply mask to prompt (명시적으로)
     prompt = prompt * prompt_mask.astype(np.float32)[:, None]
@@ -132,6 +143,7 @@ def _build_prompt_and_mask_numpy(
 # =========================
 # Optional: keep your iterator (unchanged API)
 # =========================
+
 
 def iter_cubic_records_from_hdf5(
     path: str,
@@ -148,9 +160,9 @@ def iter_cubic_records_from_hdf5(
     """(너가 준 코드 그대로 유지)"""
     with h5py.File(path, "r") as f:
         ds_cond_v = _find_first(f, ["cond_v", "cond/value", "cond_values", "condV"])
-        ds_qoi_v  = _find_first(f, ["qoi_v", "qoi/value", "qoi_values", "qoiV"])
+        ds_qoi_v = _find_first(f, ["qoi_v", "qoi/value", "qoi_values", "qoiV"])
         ds_cond_k = _find_first(f, ["cond_k", "cond/key", "cond_keys", "condK"])
-        ds_qoi_k  = _find_first(f, ["qoi_k", "qoi/key", "qoi_keys", "qoiK"])
+        ds_qoi_k = _find_first(f, ["qoi_k", "qoi/key", "qoi_keys", "qoiK"])
 
         ds_values = _find_first(f, ["values", "u", "U", "solution", "solutions"])
         ds_coeffs = _find_first(f, ["coeffs", "coeff", "params", "parameters"])
@@ -158,13 +170,17 @@ def iter_cubic_records_from_hdf5(
         ds_x = _find_first(f, ["x", "x_grid", "grid", "space"])
 
         if ds_coeffs is None:
-            raise KeyError("HDF5에서 coeffs/params를 찾지 못했습니다. inspect_hdf5로 키 이름을 확인해 주세요.")
+            raise KeyError(
+                "HDF5에서 coeffs/params를 찾지 못했습니다. inspect_hdf5로 키 이름을 확인해 주세요."
+            )
 
         coeffs_all = np.asarray(ds_coeffs[...])
         if coeffs_all.ndim == 1 and coeffs_all.size == 3:
             coeffs_all = coeffs_all[None, :]
         if coeffs_all.shape[-1] < 3:
-            raise ValueError(f"coeffs shape이 (n_pde,3) 형태가 아닙니다: {coeffs_all.shape}")
+            raise ValueError(
+                f"coeffs shape이 (n_pde,3) 형태가 아닙니다: {coeffs_all.shape}"
+            )
 
         n_pde = coeffs_all.shape[0]
 
@@ -181,23 +197,27 @@ def iter_cubic_records_from_hdf5(
             t = fallback_t
 
         if (ds_cond_v is None or ds_qoi_v is None) and (t is None):
-            raise KeyError("HDF5에 t가 없고 fallback_t도 None이라 full trajectory에서 pair를 만들 수 없습니다.")
+            raise KeyError(
+                "HDF5에 t가 없고 fallback_t도 None이라 full trajectory에서 pair를 만들 수 없습니다."
+            )
 
         # Case A: pairs already present
         if ds_cond_v is not None and ds_qoi_v is not None:
             for p in range(n_pde):
                 cond_v = _ensure_3d_pair(ds_cond_v[p], dtype=dtype)
-                qoi_v  = _ensure_3d_pair(ds_qoi_v[p],  dtype=dtype)
+                qoi_v = _ensure_3d_pair(ds_qoi_v[p], dtype=dtype)
 
                 if ds_cond_k is not None and ds_qoi_k is not None:
                     cond_k = _ensure_3d_pair(ds_cond_k[p], dtype=dtype)
-                    qoi_k  = _ensure_3d_pair(ds_qoi_k[p],  dtype=dtype)
+                    qoi_k = _ensure_3d_pair(ds_qoi_k[p], dtype=dtype)
                 else:
                     if x is None:
-                        raise KeyError("cond_k/qoi_k가 없고 x도 없어서 key를 만들 수 없습니다.")
+                        raise KeyError(
+                            "cond_k/qoi_k가 없고 x도 없어서 key를 만들 수 없습니다."
+                        )
                     x_key = x.astype(dtype)[:, None]
                     cond_k = np.broadcast_to(x_key[None, :, :], cond_v.shape).copy()
-                    qoi_k  = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
+                    qoi_k = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
 
                 if problem_type == "backward":
                     cond_k, qoi_k = qoi_k, cond_k
@@ -237,17 +257,19 @@ def iter_cubic_records_from_hdf5(
             if u.ndim == 4 and u.shape[2] == 1:
                 u = u[:, :, 0, :]
             if u.ndim != 3:
-                raise ValueError(f"values[p] expected 3D (ic,t,x) after squeeze, got {u.shape}")
+                raise ValueError(
+                    f"values[p] expected 3D (ic,t,x) after squeeze, got {u.shape}"
+                )
 
             n_ic, n_t, n_x = u.shape
             if start_idx[-1] + stride >= n_t:
                 raise ValueError("Not enough time steps in values")
 
             cond_all = u[:, start_idx, :]
-            qoi_all  = u[:, start_idx + stride, :]
+            qoi_all = u[:, start_idx + stride, :]
 
             cond_flat = cond_all.reshape(-1, n_x)
-            qoi_flat  = qoi_all.reshape(-1, n_x)
+            qoi_flat = qoi_all.reshape(-1, n_x)
 
             total_pairs = cond_flat.shape[0]
             take = min(pairs_per_operator, total_pairs)
@@ -256,7 +278,7 @@ def iter_cubic_records_from_hdf5(
             choose = rng.choice(total_pairs, size=take, replace=False)
 
             cond = cond_flat[choose][:, :, None]
-            qoi  = qoi_flat[choose][:, :, None]
+            qoi = qoi_flat[choose][:, :, None]
 
             if problem_type == "forward":
                 cond_v, qoi_v = cond, qoi
@@ -264,7 +286,7 @@ def iter_cubic_records_from_hdf5(
                 cond_v, qoi_v = qoi, cond
 
             cond_k = np.broadcast_to(x_key[None, :, :], cond_v.shape).copy()
-            qoi_k  = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
+            qoi_k = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
 
             a, b, c = map(float, coeffs_all[p][:3])
             eqn = f"{equation_prefix}_{problem_type}_a={a:.8f}_b={b:.8f}_c={c:.8f}_tau={tau:g}"
@@ -283,12 +305,14 @@ def iter_cubic_records_from_hdf5(
 # HDF5 DataProvider (the missing piece)
 # =========================
 
+
 class _H5Bank:
     """
     한 개(또는 여러 개) HDF5 파일을 열어두고, 샘플링에 필요한 dataset 핸들을 잡고 있는 클래스.
     - pairs(cond_v/qoi_v)가 있으면 그걸 사용
     - 없으면 trajectory(values)에서 on-the-fly로 (u(t),u(t+tau)) pair 샘플링
     """
+
     def __init__(
         self,
         paths: Sequence[str],
@@ -311,9 +335,9 @@ class _H5Bank:
             self.files.append(f)
 
             ds_cond_v = _find_first(f, ["cond_v", "cond/value", "cond_values", "condV"])
-            ds_qoi_v  = _find_first(f, ["qoi_v", "qoi/value", "qoi_values", "qoiV"])
+            ds_qoi_v = _find_first(f, ["qoi_v", "qoi/value", "qoi_values", "qoiV"])
             ds_cond_k = _find_first(f, ["cond_k", "cond/key", "cond_keys", "condK"])
-            ds_qoi_k  = _find_first(f, ["qoi_k", "qoi/key", "qoi_keys", "qoiK"])
+            ds_qoi_k = _find_first(f, ["qoi_k", "qoi/key", "qoi_keys", "qoiK"])
 
             ds_values = _find_first(f, ["values", "u", "U", "solution", "solutions"])
             ds_coeffs = _find_first(f, ["coeffs", "coeff", "params", "parameters"])
@@ -331,7 +355,9 @@ class _H5Bank:
             x = np.asarray(ds_x[...]) if ds_x is not None else None
             t = np.asarray(ds_t[...]) if ds_t is not None else None
 
-            mode = "pairs" if (ds_cond_v is not None and ds_qoi_v is not None) else "traj"
+            mode = (
+                "pairs" if (ds_cond_v is not None and ds_qoi_v is not None) else "traj"
+            )
             if mode == "traj":
                 if ds_values is None:
                     raise KeyError(f"[{p}] neither (cond_v,qoi_v) nor values found")
@@ -380,7 +406,9 @@ class _H5Bank:
         # returns (file_idx, local_pde_idx)
         if global_pde_idx < 0 or global_pde_idx >= self.n_total_pde:
             raise IndexError(global_pde_idx)
-        file_idx = int(np.searchsorted(self._file_offsets, global_pde_idx, side="right") - 1)
+        file_idx = int(
+            np.searchsorted(self._file_offsets, global_pde_idx, side="right") - 1
+        )
         local_idx = int(global_pde_idx - self._file_offsets[file_idx])
         return file_idx, local_idx
 
@@ -408,11 +436,15 @@ class _H5Bank:
 
         if m["mode"] == "pairs":
             ds_cond_v = m["ds_cond_v"]
-            ds_qoi_v  = m["ds_qoi_v"]
+            ds_qoi_v = m["ds_qoi_v"]
             assert ds_cond_v is not None and ds_qoi_v is not None
 
-            P = int(ds_cond_v.shape[1]) if ds_cond_v.ndim >= 2 else int(ds_cond_v.shape[0])
-     
+            P = (
+                int(ds_cond_v.shape[1])
+                if ds_cond_v.ndim >= 2
+                else int(ds_cond_v.shape[0])
+            )
+
             if select == "sequential":
                 idx = np.arange(n_pairs) % P
             else:
@@ -420,18 +452,18 @@ class _H5Bank:
 
             # (n_pairs, Nx, 1) or (n_pairs, Nx)
             cond_v = _ensure_3d_pair(ds_cond_v[pi, idx], dtype=self.dtype)
-            qoi_v  = _ensure_3d_pair(ds_qoi_v[pi, idx],  dtype=self.dtype)
+            qoi_v = _ensure_3d_pair(ds_qoi_v[pi, idx], dtype=self.dtype)
 
             if m["ds_cond_k"] is not None and m["ds_qoi_k"] is not None:
                 cond_k = _ensure_3d_pair(m["ds_cond_k"][pi, idx], dtype=self.dtype)
-                qoi_k  = _ensure_3d_pair(m["ds_qoi_k"][pi, idx],  dtype=self.dtype)
+                qoi_k = _ensure_3d_pair(m["ds_qoi_k"][pi, idx], dtype=self.dtype)
             else:
                 x = m["x"]
                 if x is None:
                     raise KeyError("pairs mode: need either (cond_k,qoi_k) or x")
                 x_key = x.astype(self.dtype)[:, None]  # (Nx,1)
                 cond_k = np.broadcast_to(x_key[None, :, :], cond_v.shape).copy()
-                qoi_k  = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
+                qoi_k = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
 
         else:
             # trajectory mode: sample (ic, start_idx) on the fly
@@ -443,11 +475,13 @@ class _H5Bank:
             start_idx = m["start_idx"]
             if x is None or t is None or start_idx is None:
                 raise RuntimeError("trajectory meta missing")
-           
+
             # u shape could be (ic, t, x) or (ic, t, 1, x)
             # we will gather pointwise for each sampled pair
             # Determine n_ic, n_t from ds_values[pi] without loading all
-            u_shape = ds_values.shape  # maybe (n_pde,n_ic,n_t,n_x) or (n_pde,n_ic,n_t,1,n_x)
+            u_shape = (
+                ds_values.shape
+            )  # maybe (n_pde,n_ic,n_t,n_x) or (n_pde,n_ic,n_t,1,n_x)
             if len(u_shape) == 4:
                 _, n_ic, n_t, n_x = u_shape
                 has_dim = False
@@ -462,10 +496,10 @@ class _H5Bank:
             ic_idx = rng.integers(0, n_ic, size=(n_pairs,), endpoint=False)
 
             if select == "sequential":
-                startnum = rng.integers(0, len(start_idx)-200)
-                si = np.arange(startnum, startnum + 10*n_pairs,10) 
+                startnum = rng.integers(0, len(start_idx) - 200)
+                si = np.arange(startnum, startnum + 10 * n_pairs, 10)
                 print(si)
-            else:       
+            else:
                 si = rng.integers(0, len(start_idx), size=(n_pairs,), endpoint=False)
 
             t0 = start_idx[si]
@@ -473,19 +507,19 @@ class _H5Bank:
 
             # build arrays
             cond_v = np.zeros((n_pairs, n_x, 1), dtype=self.dtype)
-            qoi_v  = np.zeros((n_pairs, n_x, 1), dtype=self.dtype)
-            #print(ic_idx,t0)
+            qoi_v = np.zeros((n_pairs, n_x, 1), dtype=self.dtype)
+            # print(ic_idx,t0)
             for i in range(n_pairs):
                 if not has_dim:
                     cond_v[i, :, 0] = ds_values[pi, ic_idx[i], t0[i], :]
-                    qoi_v[i, :, 0]  = ds_values[pi, ic_idx[i], t1[i], :]
+                    qoi_v[i, :, 0] = ds_values[pi, ic_idx[i], t1[i], :]
                 else:
                     cond_v[i, :, 0] = ds_values[pi, ic_idx[i], t0[i], 0, :]
-                    qoi_v[i, :, 0]  = ds_values[pi, ic_idx[i], t1[i], 0, :]
+                    qoi_v[i, :, 0] = ds_values[pi, ic_idx[i], t1[i], 0, :]
 
             x_key = x.astype(self.dtype)[:, None]  # (Nx,1)
             cond_k = np.broadcast_to(x_key[None, :, :], cond_v.shape).copy()
-            qoi_k  = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
+            qoi_k = np.broadcast_to(x_key[None, :, :], qoi_v.shape).copy()
 
         # forward/backward swap
         if direction == "backward":
@@ -502,6 +536,7 @@ class DataProvider:
     get_next_data() -> (equation(list[str]), prompt, mask, query, query_mask, ground_truth)
     그리고 내부에서 multi-device용으로 (num_devices, batch_per_device, ...) reshape까지 수행.
     """
+
     def __init__(
         self,
         seed: int,
@@ -548,7 +583,9 @@ class DataProvider:
 
         self.num_devices = int(num_devices)
         if self.batch_size % self.num_devices != 0:
-            raise ValueError(f"batch_size({self.batch_size}) must be divisible by num_devices({self.num_devices})")
+            raise ValueError(
+                f"batch_size({self.batch_size}) must be divisible by num_devices({self.num_devices})"
+            )
 
         self.tau = float(tau)
         self.t_init_window = float(t_init_window)
@@ -607,7 +644,9 @@ class DataProvider:
         return_raw: bool = False,
     ):
         if list_size != 0:
-            raise NotImplementedError("HDF5 DataProvider: list_size>0 not implemented (use 0)")
+            raise NotImplementedError(
+                "HDF5 DataProvider: list_size>0 not implemented (use 0)"
+            )
 
         dirs = self._sample_direction_for_batch()
 
@@ -627,19 +666,23 @@ class DataProvider:
             n_pairs = self.demo_num + 1
 
             eqn, cond_k, cond_v, qoi_k, qoi_v = self.bank.sample_pairs_for_operator(
-                self.rng, pde_idx, n_pairs=n_pairs, direction=dirs[bi], select=self.select
+                self.rng,
+                pde_idx,
+                n_pairs=n_pairs,
+                direction=dirs[bi],
+                select=self.select,
             )
 
             # split demos vs quest
             demo_cond_k = cond_k[: self.demo_num]  # (demo_num, Nx, 1)
             demo_cond_v = cond_v[: self.demo_num]
-            demo_qoi_k  = qoi_k[: self.demo_num]
-            demo_qoi_v  = qoi_v[: self.demo_num]
+            demo_qoi_k = qoi_k[: self.demo_num]
+            demo_qoi_v = qoi_v[: self.demo_num]
 
             quest_cond_k = cond_k[self.demo_num : self.demo_num + 1]  # (1, Nx, 1)
             quest_cond_v = cond_v[self.demo_num : self.demo_num + 1]
-            quest_qoi_k  = qoi_k[self.demo_num : self.demo_num + 1]
-            quest_qoi_v  = qoi_v[self.demo_num : self.demo_num + 1]
+            quest_qoi_k = qoi_k[self.demo_num : self.demo_num + 1]
+            quest_qoi_v = qoi_v[self.demo_num : self.demo_num + 1]
 
             # (Nx,1) -> (cond_len,k_dim)/(cond_len,v_dim) with pad/trunc
             # keys
@@ -650,7 +693,7 @@ class DataProvider:
                 mask = np.zeros((B, L), dtype=bool)
                 for i in range(B):
                     x2 = x_3d[i].astype(np.float32)  # (Nx,1)
-                    x2, m2 = _pad_trunc_2d(x2, L)    # (L,1), (L,)
+                    x2, m2 = _pad_trunc_2d(x2, L)  # (L,1), (L,)
                     # pad to k_dim
                     if self.k_dim > x2.shape[1]:
                         x2 = np.pad(x2, ((0, 0), (0, self.k_dim - x2.shape[1])))
@@ -673,28 +716,32 @@ class DataProvider:
                 return out, mask
 
             demo_cond_k2, demo_cond_mask = prep_k(demo_cond_k, self.cond_len)
-            demo_cond_v2, _             = prep_v(demo_cond_v, self.cond_len)
-            demo_qoi_k2,  demo_qoi_mask = prep_k(demo_qoi_k,  self.qoi_len)
-            demo_qoi_v2,  _             = prep_v(demo_qoi_v,  self.qoi_len)
+            demo_cond_v2, _ = prep_v(demo_cond_v, self.cond_len)
+            demo_qoi_k2, demo_qoi_mask = prep_k(demo_qoi_k, self.qoi_len)
+            demo_qoi_v2, _ = prep_v(demo_qoi_v, self.qoi_len)
 
             quest_cond_k2, quest_cond_mask = prep_k(quest_cond_k, self.cond_len)
-            quest_cond_v2, _               = prep_v(quest_cond_v, self.cond_len)
-            quest_qoi_k2,  quest_qoi_mask  = prep_k(quest_qoi_k,  self.qoi_len)
-            quest_qoi_v2,  _               = prep_v(quest_qoi_v,  self.qoi_len)
+            quest_cond_v2, _ = prep_v(quest_cond_v, self.cond_len)
+            quest_qoi_k2, quest_qoi_mask = prep_k(quest_qoi_k, self.qoi_len)
+            quest_qoi_v2, _ = prep_v(quest_qoi_v, self.qoi_len)
 
             # prompt/mask
             prompt, pmask = _build_prompt_and_mask_numpy(
-                demo_cond_k2, demo_cond_v2, demo_qoi_k2, demo_qoi_v2,
-                quest_cond_k2, quest_cond_v2,
+                demo_cond_k2,
+                demo_cond_v2,
+                demo_qoi_k2,
+                demo_qoi_v2,
+                quest_cond_k2,
+                quest_cond_v2,
                 demo_num=self.demo_num,
                 cond_len=self.cond_len,
                 qoi_len=self.qoi_len,
             )
 
             # query/gt/mask (quest qoi)
-            query = quest_qoi_k2[0].astype(np.float32)         # (qoi_len, k_dim)
-            gt    = quest_qoi_v2[0].astype(np.float32)         # (qoi_len, v_dim)
-            qmask = quest_qoi_mask[0].astype(bool)             # (qoi_len,)
+            query = quest_qoi_k2[0].astype(np.float32)  # (qoi_len, k_dim)
+            gt = quest_qoi_v2[0].astype(np.float32)  # (qoi_len, v_dim)
+            qmask = quest_qoi_mask[0].astype(bool)  # (qoi_len,)
 
             prompt_list.append(prompt)
             mask_list.append(pmask)
@@ -707,11 +754,11 @@ class DataProvider:
                 raw_list.append((cond_k, cond_v, qoi_k, qoi_v))
 
         # stack batch
-        prompt_b = np.stack(prompt_list, axis=0)         # (B, prompt_len, prompt_dim)
-        mask_b   = np.stack(mask_list, axis=0)           # (B, prompt_len)
-        query_b  = np.stack(query_list, axis=0)          # (B, qoi_len, k_dim)
-        qmask_b  = np.stack(query_mask_list, axis=0)     # (B, qoi_len)
-        gt_b     = np.stack(gt_list, axis=0)             # (B, qoi_len, v_dim)
+        prompt_b = np.stack(prompt_list, axis=0)  # (B, prompt_len, prompt_dim)
+        mask_b = np.stack(mask_list, axis=0)  # (B, prompt_len)
+        query_b = np.stack(query_list, axis=0)  # (B, qoi_len, k_dim)
+        qmask_b = np.stack(query_mask_list, axis=0)  # (B, qoi_len)
+        gt_b = np.stack(gt_list, axis=0)  # (B, qoi_len, v_dim)
 
         # reshape to (num_devices, batch_per_device, ...)
         B = self.batch_size
@@ -719,17 +766,17 @@ class DataProvider:
         bd = B // nd
 
         prompt_b = prompt_b.reshape(nd, bd, *prompt_b.shape[1:])
-        mask_b   = mask_b.reshape(nd, bd, *mask_b.shape[1:])
-        query_b  = query_b.reshape(nd, bd, *query_b.shape[1:])
-        qmask_b  = qmask_b.reshape(nd, bd, *qmask_b.shape[1:])
-        gt_b     = gt_b.reshape(nd, bd, *gt_b.shape[1:])
+        mask_b = mask_b.reshape(nd, bd, *mask_b.shape[1:])
+        query_b = query_b.reshape(nd, bd, *query_b.shape[1:])
+        qmask_b = qmask_b.reshape(nd, bd, *qmask_b.shape[1:])
+        gt_b = gt_b.reshape(nd, bd, *gt_b.shape[1:])
 
         # to jax arrays
         prompt_b = jnp.asarray(prompt_b)
-        mask_b   = jnp.asarray(mask_b)
-        query_b  = jnp.asarray(query_b)
-        qmask_b  = jnp.asarray(qmask_b)
-        gt_b     = jnp.asarray(gt_b)
+        mask_b = jnp.asarray(mask_b)
+        query_b = jnp.asarray(query_b)
+        qmask_b = jnp.asarray(qmask_b)
+        gt_b = jnp.asarray(gt_b)
 
         if return_raw:
             return raw_list, eqn_list, prompt_b, mask_b, query_b, qmask_b, gt_b
@@ -737,17 +784,25 @@ class DataProvider:
 
     def pretty_print(self, equation, prompt, mask, query, query_mask, ground_truth):
         from pprint import pprint
+
         pprint(equation[: min(5, len(equation))])
         print("prompt size:", tree.tree_map(lambda x: x.shape, prompt), flush=True)
         print("mask size:", tree.tree_map(lambda x: x.shape, mask), flush=True)
         print("query size:", tree.tree_map(lambda x: x.shape, query), flush=True)
-        print("query_mask size:", tree.tree_map(lambda x: x.shape, query_mask), flush=True)
-        print("ground_truth size:", tree.tree_map(lambda x: x.shape, ground_truth), flush=True)
+        print(
+            "query_mask size:", tree.tree_map(lambda x: x.shape, query_mask), flush=True
+        )
+        print(
+            "ground_truth size:",
+            tree.tree_map(lambda x: x.shape, ground_truth),
+            flush=True,
+        )
 
 
 # =========================
 # Inspect helper
 # =========================
+
 
 def inspect_hdf5(path: str, max_attrs: int = 20):
     def _print(name, obj):
@@ -755,6 +810,7 @@ def inspect_hdf5(path: str, max_attrs: int = 20):
             print(f"[DS] {name}: shape={obj.shape}, dtype={obj.dtype}")
         elif isinstance(obj, h5py.Group):
             print(f"[GRP] {name}/")
+
     with h5py.File(path, "r") as f:
         print("=== FILE ATTRS ===")
         for i, (k, v) in enumerate(f.attrs.items()):
