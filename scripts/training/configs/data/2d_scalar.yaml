@@ -1,0 +1,6 @@
+name: cubicflux_2d
+num_spatial_dims: 2
+channels: 1
+loadpath_train: ./data/2d_cubic_training_1000_100.hdf5
+loadpath_valid: ./data/2d_cubic_test_100_100.hdf5
+max_train_time_index: 80
