@@ -32,9 +32,9 @@ def pdesolve_pyclaw(
     *,
     verbose: bool = True,
 ) -> tuple[
-    Float[np.ndarray, "time dim x_grid"],
+    Float[np.ndarray, "time dim *xs"],
     Float[np.ndarray, " time"],
-    Float[np.ndarray, " x_grid"],
+    list[Float[np.ndarray, " ?x"]],
 ]:
     if not verbose:
         # See https://www.clawpack.org/pyclaw/output.html#logging
@@ -56,8 +56,8 @@ def pdesolve_pyclaw(
 
     u = solution_from_controller(controller)
     t = np.asarray(controller.out_times)
-    (x_grid,) = grid_centers_from_state(state)
-    return u, t, x_grid
+    xs = grid_centers_from_state(state)
+    return u, t, xs
 
 
 def solution_to_dataset(

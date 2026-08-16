@@ -26,9 +26,7 @@ def get_coordinate_spacing(dataset: xr.Dataset, coordinate: str) -> float:
     values = dataset[coordinate]
 
     if values.size < 2:
-        raise ValueError(
-            f"Coordinate '{coordinate}' must contain at least two points."
-        )
+        raise ValueError(f"Coordinate '{coordinate}' must contain at least two points.")
 
     return float(values[1] - values[0])
 
@@ -88,23 +86,17 @@ def main(cfg: DictConfig) -> None:
 
     model = hydra.utils.instantiate(cfg.model)
 
-    dataset_train = (
-        xr.open_dataset(
-            cfg.data.loadpath_train,
-            engine="h5netcdf",
-            chunks={},
-        )
-        .isel(t=slice(0, cfg.data.max_train_time_index))
-    )
+    dataset_train = xr.open_dataset(
+        cfg.data.loadpath_train,
+        engine="h5netcdf",
+        chunks={},
+    ).isel(t=slice(0, cfg.data.max_train_time_index))
 
-    dataset_valid = (
-        xr.open_dataset(
-            cfg.data.loadpath_valid,
-            engine="h5netcdf",
-            chunks={},
-        )
-        .isel(t=slice(0, cfg.data.max_train_time_index))
-    )
+    dataset_valid = xr.open_dataset(
+        cfg.data.loadpath_valid,
+        engine="h5netcdf",
+        chunks={},
+    ).isel(t=slice(0, cfg.data.max_train_time_index))
 
     validate_spatial_2d_dataset(dataset_train)
     validate_spatial_2d_dataset(dataset_valid)

@@ -122,5 +122,5 @@ class SpatiotemporalFNO(AbstractMultiphysicsOperator):
         u_out: Float[Array, "channels time *grids"] = self.fno(
             rearrange(u, "t c ... -> c t ...")
         )
-        u_out=u_out[:,-1]
+        u_out = u_out[:, -1]
         return u_out, None

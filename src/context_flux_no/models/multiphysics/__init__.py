@@ -1,5 +1,6 @@
 from context_flux_no.models.multiphysics.hyperfluxfno.hyperfluxfno import (
-    HyperNeuralOperator as HyperNeuralOperator, ContextAppendedFluxNO as ContextAppendedFluxNO,
+    HyperNeuralOperator as HyperNeuralOperator,
+    ContextAppendedFluxNO as ContextAppendedFluxNO,
 )
 
 from .abstract import AbstractMultiphysicsOperator as AbstractMultiphysicsOperator

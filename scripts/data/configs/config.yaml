@@ -16,11 +16,11 @@ n_ics_per_coeff: 100
 x_span: [0, 1]
 Nx: 100
 t_span: [0, 0.5]
-Nt: 1000
+Nt: 100
 seed: 0
 dataset_type: "train"
 
-savepath: ./data
-savename: ${.pde.name}_${.dataset_type}_${.initial_condition.name}_seed=${.seed}.hdf5
+savedir: ./data/datasets
+savename: ${.pde.name}_${.initial_condition.name}_seed=${.seed}.zarr
 
 gpu_id: "auto" # or integer

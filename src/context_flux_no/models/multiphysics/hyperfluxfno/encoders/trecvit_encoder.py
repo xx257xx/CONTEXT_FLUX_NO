@@ -290,7 +290,7 @@ class TRecViTEncoder(AbstractEncoder):
             ),
             method="linear",
         )
-        print(u.shape)
+
         v: Float[Array, "time embedding_dim *grids_patch"] = eqx.filter_vmap(
             lambda x: self.tokenizer(x)
         )(u)

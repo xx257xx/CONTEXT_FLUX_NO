@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from math import ceil
 from typing import ClassVar, Literal
 
@@ -10,6 +10,7 @@ from clawpack import pyclaw
 from jaxtyping import Array, Float
 
 from ..pdesolve import pdesolve_pyclaw, solution_to_dataset
+from .base import AbstractHyperbolicConservationLaw
 
 
 def riemann_cubic_1D(
@@ -44,9 +45,10 @@ def riemann_cubic_1D(
     return wave, s, amdq, apdq
 
 
-class CubicFlux1D(eqx.Module):
-    n_dim: ClassVar[int] = 1
-    n_eqns: ClassVar[int] = 1
+class CubicFlux1D(AbstractHyperbolicConservationLaw):
+    n_spatial_dims: ClassVar[int] = 1
+    field_rank_names: ClassVar[tuple[tuple[int, str]]] = ((0, "u"),)
+
     a: float = eqx.field(static=True)
     b: float = eqx.field(static=True)
     c: float = eqx.field(static=True)
@@ -57,7 +59,7 @@ class CubicFlux1D(eqx.Module):
         self.c = c
 
     @property
-    def coeffs(self) -> dict[str, float]:
+    def parameters(self) -> dict[str, float]:
         return {"a": self.a, "b": self.b, "c": self.c}
 
     def solve(
@@ -67,7 +69,7 @@ class CubicFlux1D(eqx.Module):
         Nx: int,
         t_span: tuple[float, float],
         Nt: int,
-        bc: Literal["periodic"],
+        bc: Literal["periodic"],  # TODO: extend to other types as well
         **pdesolve_kwargs,
     ) -> tuple[
         Float[np.ndarray, "time dim x_grid"],
@@ -95,7 +97,8 @@ class CubicFlux1D(eqx.Module):
             bc,
             **pdesolve_kwargs,
         )
-        return solution_to_dataset(u, t, (x_grid,), self.coeffs)
+        return u, t, x_grid
+        # return solution_to_dataset(u, t, (x_grid,), self.parameters)
 
 
 class CubicFlux2D(eqx.Module):
