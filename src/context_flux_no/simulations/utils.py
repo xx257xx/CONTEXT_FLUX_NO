@@ -51,7 +51,7 @@ def generate_dataset(
     t_span: tuple[float, float],
     Nt: int,
     bc: Literal["periodic"] = "periodic",
-    dataset_type: Literal["train", "validation", "test"] = "train",
+    dataset_type: Literal["train", "valid", "test"] = "train",
     savedir: str | Path = "./",
     filename: str | None = None,
     codec: zarr.abc.codec.Codec | None = zarr.codecs.BloscCodec(
@@ -62,7 +62,7 @@ def generate_dataset(
     if filename is None:
         filename = f"{dataset_name}_{seed=}.zarr"
     savepath = Path(savedir) / dataset_name / "data" / dataset_type / filename
-    base_key = jax.random.key({"train": 0, "validation": 1, "test": 2}[dataset_type])
+    base_key = jax.random.key({"train": 0, "valid": 1, "test": 2}[dataset_type])
     keys = jax.random.split(jax.random.fold_in(base_key, seed), n_coeffs)
 
     write_idx = 0
