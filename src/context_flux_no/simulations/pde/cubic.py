@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from math import ceil
 from typing import ClassVar, Literal
 

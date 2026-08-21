@@ -3,7 +3,6 @@ from typing import Any
 
 import equinox as eqx
 import jax
-import jax.numpy as jnp
 from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 

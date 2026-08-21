@@ -5,11 +5,11 @@ from typing import Any, Literal
 
 import equinox as eqx
 import jax
+import numpy as np
 import zarr
 from jaxtyping import Array, PRNGKeyArray
 from more_itertools import mark_ends
 from tqdm import tqdm
-import numpy as np
 
 from context_flux_no.simulations.dataset import ZarrWellDataset
 from context_flux_no.simulations.pde.base import AbstractHyperbolicConservationLaw

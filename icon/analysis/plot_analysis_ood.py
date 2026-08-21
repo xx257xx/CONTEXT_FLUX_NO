@@ -1,14 +1,17 @@
 import pickle
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from absl import app, flags, logging
 import sys
 
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import numpy as np
+from absl import app, flags
+
+
 sys.path.append("../")
-from jax.config import config
-import tensorflow as tf
 import os
+
+import tensorflow as tf
+
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 tf.config.set_visible_devices([], device_type="GPU")

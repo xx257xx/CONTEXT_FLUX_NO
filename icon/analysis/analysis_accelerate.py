@@ -1,38 +1,32 @@
-from jax.config import config
-import tensorflow as tf
 import os
+
+import tensorflow as tf
+
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 tf.config.set_visible_devices([], device_type="GPU")
-from pprint import pprint
 import sys
+from pprint import pprint
+
 
 sys.path.append("../")
 
-import jax
-import jax.numpy as jnp
-import jax.tree_util as tree
-import numpy as np
-from functools import partial
-import haiku as hk
-import optax
-import pytz
-from datetime import datetime
-import pickle
-from absl import app, flags, logging
-from collections import namedtuple
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-from einshape import jax_einshape as einshape
-from utils import load_json
 import gc
-
-import utils
 import glob
+import pickle
 from pprint import pprint
+
 import dataloader
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
+import optax
 import plot
 import run
+import utils
+from absl import app, flags
+from einshape import jax_einshape as einshape
+from utils import load_json
 
 
 def get_key(task, eqn_name):

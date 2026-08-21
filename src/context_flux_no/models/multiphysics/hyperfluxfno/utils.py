@@ -1,13 +1,11 @@
 import warnings
 from typing import Literal
 
+import jax.nn as jnn
 from jaxtyping import PRNGKeyArray
 
-from .base import AbstractEncoder
-from .dpot_encoder import DPOTEncoder
-from .trecvit_encoder import TRecViTEncoder
-from .vit_encoder import ViTEncoder
-import jax.nn as jnn
+from .encoders import AbstractEncoder, DPOTEncoder, TRecViTEncoder, ViTEncoder
+
 
 def _get_activation(name: str):
     if name.startswith("jax.nn."):

@@ -1,5 +1,5 @@
-import numpy as np
 import tensorflow as tf
+
 
 tf_rng_seq = tf.random.Generator.from_seed(1234)
 

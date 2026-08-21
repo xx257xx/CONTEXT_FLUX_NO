@@ -1,18 +1,16 @@
 # h5loader.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Iterator, Literal, Optional, Tuple, Sequence, List, Union
-
 import glob
-import numpy as np
-import h5py
+from dataclasses import dataclass
+from typing import Dict, Iterator, List, Literal, Optional, Sequence, Tuple, Union
 
+import h5py
+import haiku as hk
 import jax
 import jax.numpy as jnp
 import jax.tree_util as tree
-import haiku as hk
-from einshape import jax_einshape as einshape
+import numpy as np
 
 
 # =========================

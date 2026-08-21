@@ -1,31 +1,25 @@
-import jax
-from jax import config
-import tensorflow as tf
 import os
+
+import jax
+import tensorflow as tf
 from utils import load_json
+
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 tf.config.set_visible_devices([], device_type="GPU")
+import pickle
+from datetime import datetime
 from pprint import pprint
 
+import haiku as hk
 import jax
 import jax.numpy as jnp
-import jax.tree_util as tree
-import numpy as np
-from functools import partial
-import haiku as hk
-import optax
+import models
+import plot
 import pytz
-from datetime import datetime
 import utils
 from absl import app, flags, logging
-from collections import namedtuple
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import pickle
-import models
 from dataloader import DataProvider
-import plot
 from einshape import jax_einshape as einshape
 
 

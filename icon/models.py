@@ -1,12 +1,11 @@
-import jax
-import jax.numpy as jnp
-import numpy as np
-from functools import partial
-import haiku as hk
-import utils
-from transformer import SelfAttnTransformer, CrossAttnTransformer
-from einshape import jax_einshape as einshape
 import dataclasses
+
+import haiku as hk
+import jax
+import numpy as np
+import utils
+from einshape import jax_einshape as einshape
+from transformer import CrossAttnTransformer, SelfAttnTransformer
 
 
 def pad_and_concat(demos, quest_cond, k_dim, v_dim, cond_len, qoi_len, demo_num):

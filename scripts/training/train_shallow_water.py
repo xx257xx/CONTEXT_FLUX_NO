@@ -5,8 +5,6 @@ import jax
 import xarray as xr
 from context_flux_no.models.multiphysics import (
     AbstractMultiphysicsOperator,
-    HyperFluxFNOLocal,
-    HyperNeuralOperator,
 )
 from context_flux_no.training.loader import SegmentLoaderBackground
 from context_flux_no.training.loss import PushforwardOneStepLoss

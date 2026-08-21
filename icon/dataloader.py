@@ -1,19 +1,20 @@
 import numpy as np
-
 import tensorflow as tf
+
 
 tf.config.set_visible_devices([], device_type="GPU")
 from functools import partial
-import tensorflow as tf
-import numpy as np
-import data_sequence
 from pprint import pprint
 
+import data_sequence
+import haiku as hk
 import jax
 import jax.numpy as jnp
 import jax.tree_util as tree
-import haiku as hk
+import numpy as np
+import tensorflow as tf
 from einshape import jax_einshape as einshape
+
 
 tf_rng = tf.random.Generator.from_seed(15)
 

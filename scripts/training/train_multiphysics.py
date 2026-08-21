@@ -53,7 +53,7 @@ def main(cfg: DictConfig) -> None:
         )
     loader_valid = grain.DataLoader(
             data_source=source_valid,
-            sampler=grain.samplers.IndexSampler(len(source_train), shuffle=True, seed=2),
+            sampler=grain.samplers.IndexSampler(len(source_valid), shuffle=True, seed=1),
             operations=[grain.transforms.Batch(batch_size=cfg.training.batch_size)],
             worker_count=cfg.data.worker_count,
             worker_buffer_size=50,

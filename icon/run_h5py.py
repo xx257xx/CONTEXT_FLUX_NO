@@ -11,35 +11,32 @@
 
 import os
 
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import inspect
-from pprint import pprint
-from datetime import datetime
 import pickle
-
+from datetime import datetime
+from pprint import pprint
 
 import pytz
-import numpy as np
 import tensorflow as tf
+
 
 tf.config.set_visible_devices([], device_type="GPU")
 
+import haiku as hk
 import jax
 import jax.numpy as jnp
-from einshape import jax_einshape as einshape
-import haiku as hk
-
-from absl import app, flags, logging
-
-import utils
-from utils import load_json
-
 import models
 import plot
+import utils
+from absl import app, flags
+from einshape import jax_einshape as einshape
 
 # IMPORTANT: use your HDF5 loader
 from h5loader import DataProvider
+from utils import load_json
 
 
 gpus = tf.config.list_physical_devices(device_type="GPU")

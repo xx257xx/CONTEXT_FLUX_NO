@@ -3,13 +3,10 @@ from typing import Any
 
 import equinox as eqx
 import jax
-import jax.numpy as jnp
-from einops import rearrange
 from jaxtyping import Array, Float, PRNGKeyArray
 
-from ..fno import FNO
-from .hyperfluxfno.target_networks import FluxNOTargetNetwork
 from .abstract import AbstractMultiphysicsOperator
+from .hyperfluxfno.target_networks import FluxNOTargetNetwork
 
 
 class NaiveFluxNO(AbstractMultiphysicsOperator):

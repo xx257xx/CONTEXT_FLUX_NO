@@ -1,17 +1,18 @@
-from functools import wraps, partial
+import io
+import json
 import time
+from datetime import datetime, timedelta
+from functools import partial, wraps
+
 import haiku as hk
-import optax
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
-import io
-import tensorflow as tf
 import jax.tree_util as tree
-import os
-import json
+import matplotlib.pyplot as plt
+import optax
 import pytz
-from datetime import datetime, timedelta
+import tensorflow as tf
+
 
 # see https://matplotlib.org/stable/gallery/lines_bars_and_markers/linestyles.html
 linestyles = {
