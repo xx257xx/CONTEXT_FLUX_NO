@@ -1,0 +1,39 @@
+# Shock-dominated shallow-water test set with a chosen plateau range (ICLR 2027
+# rebuttal, action 5b). Read by scripts/data/generate_shallow_water_step_1d.py.
+defaults:
+  - override hydra/launcher: submitit_slurm
+  - _self_
+
+hydra:
+  launcher:
+    timeout_min: 900
+    tasks_per_node: 1
+    gpus_per_node: 1
+
+# Range of the plateau values of h(0). [0.5, 2.0] is the low set of the rebuttal plan,
+# the 16th to 84th percentile of the training h. [0.5, 4.5] repeats the submitted set.
+plateau_range: [0.5, 2.0]
+
+# Name of the set in the file name: shallow_water_1d_test_step_{set_name}_grf_seed=...
+set_name: low
+
+# Key derivation of the submitted shock set, which notebook cell 12 of
+# notebooks/data_generation/shallow_water_1D.ipynb generated with seed=10 and the
+# default dataset_type="train" (base key 0). These four values stay fixed for a set
+# that is paired with it.
+seed: 10
+base_key: 0
+n_coeffs: 100
+n_ics_per_coeff: 100
+
+# null solves every trajectory. An integer k solves the first k initial conditions of
+# the first k coefficient draws, with the keys of the full set, and writes a separate
+# file. The pilot of the rebuttal plan is 10.
+pilot_size: null
+
+x_span: [0.0, 1.0]
+Nx: 100
+t_span: [0.0, 0.5]
+Nt: 100
+
+savedir: ./data/datasets/shallow_water_1d/data/test
