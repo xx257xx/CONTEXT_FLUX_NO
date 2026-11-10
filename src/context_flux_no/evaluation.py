@@ -306,10 +306,12 @@ def summarize_rollouts(
     A dictionary with the following entries.
 
     - `valid_horizon_quartiles`: The 25th, 50th and 75th percentile of the valid
-        horizon (D2), where a rollout that stays below persistence counts as `horizon`.
-    - `fraction_never_crossed`: The fraction of rollouts that stay below persistence.
-    - `fraction_crossed_at_step_1`: The fraction that is no better than persistence at
-        the first step.
+        horizon (D2), where a rollout that stays below the identity baseline counts as
+        `horizon`.
+    - `fraction_never_crossed`: The fraction of rollouts that stay below the identity
+        baseline.
+    - `fraction_crossed_at_step_1`: The fraction that is no better than the identity
+        baseline at the first step.
     - `fraction_nonfinite`, `fraction_diverged`, `fraction_nonpositive`: The fraction
         of rollouts affected at any step up to each of `report_steps` (D3). A
         non-finite step counts as diverged. `fraction_nonpositive` is `None` without
@@ -327,10 +329,10 @@ def summarize_rollouts(
 
     l2 = l2[..., :horizon]
     nonfinite = nonfinite[..., :horizon]
-    l2_persistence = references.l2_persistence[..., :horizon]
+    l2_identity = references.l2_identity[..., :horizon]
     l2_spatial_mean = references.l2_spatial_mean[..., :horizon]
 
-    horizons = valid_horizon(l2, l2_persistence, nonfinite)
+    horizons = valid_horizon(l2, l2_identity, nonfinite)
     with np.errstate(invalid="ignore"):
         diverged = (l2 > l2_spatial_mean) | nonfinite | ~np.isfinite(l2)
         ratio = (

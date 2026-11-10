@@ -165,14 +165,14 @@ class RolloutReferences(eqx.Module):
 
     **Attributes:**
 
-    - `l2_persistence`: The relative l2 error of the prediction that holds the last
+    - `l2_identity`: The relative l2 error of the prediction that holds the last
         context state over the whole rollout (D1).
     - `l2_spatial_mean`: The relative l2 error of the prediction that holds the cell
         mean of each channel of the last context state (D1).
     - `total_variation`: The total variation of the first channel of the reference.
     """
 
-    l2_persistence: Float[Array, " steps"]
+    l2_identity: Float[Array, " steps"]
     l2_spatial_mean: Float[Array, " steps"]
     total_variation: Float[Array, " steps"]
 
@@ -188,10 +188,10 @@ def rollout_references(
     - `u_context_last`: The last state of the context window.
     - `u_data`: The reference solution at the steps of the rollout.
     """
-    persistence = jnp.broadcast_to(u_context_last, u_data.shape)
+    identity = jnp.broadcast_to(u_context_last, u_data.shape)
     spatial_mean = jnp.broadcast_to(spatial_mean_field(u_context_last), u_data.shape)
     return RolloutReferences(
-        l2_persistence=jax.vmap(relative_L2_error)(persistence, u_data),
+        l2_identity=jax.vmap(relative_L2_error)(identity, u_data),
         l2_spatial_mean=jax.vmap(relative_L2_error)(spatial_mean, u_data),
         total_variation=jax.vmap(total_variation)(u_data[:, 0]),
     )
@@ -261,16 +261,17 @@ def first_true_step(
 
 def valid_horizon(
     l2: Float[np.ndarray, " *batch steps"],
-    l2_persistence: Float[np.ndarray, " *batch steps"],
+    l2_identity: Float[np.ndarray, " *batch steps"],
     nonfinite: Bool[np.ndarray, " *batch steps"],
 ) -> Int[np.ndarray, " *batch"]:
-    """Return the first step at which a rollout is no better than persistence (D2).
+    """Return the first step at which a rollout is no better than the identity
+    baseline (D2).
 
-    The valid horizon is the first step `n` with `l2[n] >= l2_persistence[n]`. A step
+    The valid horizon is the first step `n` with `l2[n] >= l2_identity[n]`. A step
     with a non-finite prediction also ends it. Steps are counted from 1, and a rollout
-    that stays below the persistence error receives `steps + 1`, so the caller can tell
-    it apart from a rollout that crosses at the last step.
+    that stays below the identity-baseline error receives `steps + 1`, so the caller
+    can tell it apart from a rollout that crosses at the last step.
     """
     with np.errstate(invalid="ignore"):
-        no_better = l2 >= l2_persistence
+        no_better = l2 >= l2_identity
     return first_true_step(no_better | nonfinite | ~np.isfinite(l2))
