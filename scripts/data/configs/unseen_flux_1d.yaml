@@ -1,0 +1,45 @@
+# Graded unseen-flux test sets for the 1D cubic checkpoints (ICLR 2027 rebuttal, 1b).
+# Read by scripts/data/generate_unseen_flux_1d.py.
+defaults:
+  - override hydra/launcher: submitit_slurm
+  - _self_
+
+hydra:
+  launcher:
+    timeout_min: 900
+    tasks_per_node: 1
+    gpus_per_node: 1
+
+# sine_rescaled: f(u) = (a'/|b|) sin(b u), a' ~ U[-amplitude, amplitude], |b| in a bin.
+# cubic_shell:   the cubic flux with max|c_i| in a bin outside the training box.
+# sine_box:      f(u) = a sin(b u), (a, b) ~ U[-1, 1]^2, the draws of the submitted set.
+flux: sine_rescaled
+
+# Index into bins[flux]. Required for sine_rescaled and cubic_shell, null for sine_box.
+bin_index: null
+bins:
+  sine_rescaled: [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]]
+  cubic_shell: [[1.0, 1.5], [1.5, 2.0], [2.0, 2.5]]
+
+# 1.0 is the agreed sweep. 2.0 is the fallback variant of the rebuttal plan.
+sine_amplitude_max: 1.0
+
+# grf: periodic Gaussian random field of Section B.2. step: shock-dominated family.
+# The key is not `initial_condition`, which Hydra reads as the config group of that name.
+initial_condition_name: step
+
+n_coeffs: 100
+n_ics_per_coeff: 100
+
+x_span: [0.0, 1.0]
+Nx: 100
+t_span: [0.0, 0.5]
+# The solver writes Nt + 1 frames and every save_every-th frame is stored, as the
+# submitted sets were solved with Nt = 1000 and evaluated on every 10th frame.
+Nt: 1000
+save_every: 10
+
+# Seed 13 for the new sets. Seed 12 with flux=sine_box repeats the submitted sine draws.
+seed: 13
+
+savedir: ./data/datasets/cubic_no_source/data/test
