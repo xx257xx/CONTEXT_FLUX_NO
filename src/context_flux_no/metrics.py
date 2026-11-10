@@ -275,3 +275,70 @@ def valid_horizon(
     with np.errstate(invalid="ignore"):
         no_better = l2 >= l2_identity
     return first_true_step(no_better | nonfinite | ~np.isfinite(l2))
+
+
+# --- Segment errors and front measures (ICLR 2027 rebuttal, actions 5a and 5b) ------
+#
+# A segment is a context window followed by the frames that a model predicts from it.
+# The definitions below act on one segment or one snapshot and are left undecorated.
+
+
+class SegmentErrors(eqx.Module):
+    """Errors of one prediction over one segment, in the metrics of the submission.
+
+    The four numbers are those of `compute_metrics` in the evaluation notebooks of the
+    submission, such as `notebooks/evaluation/evaluate_shallow.ipynb`.
+
+    **Attributes:**
+
+    - `l2_onestep`: The relative l2 error of the first predicted frame.
+    - `l_inf_onestep`: The relative l-infinity error of the first predicted frame.
+    - `l2_rollout`: The relative l2 error of all predicted frames, with one norm over
+        time, channels and space.
+    - `l_inf_rollout`: The relative l-infinity error of all predicted frames.
+    """
+
+    l2_onestep: Float[Array, ""]
+    l_inf_onestep: Float[Array, ""]
+    l2_rollout: Float[Array, ""]
+    l_inf_rollout: Float[Array, ""]
+
+
+def segment_errors(
+    u_pred: Float[Array, " steps channels *spatial_dims"],
+    u_data: Float[Array, " steps channels *spatial_dims"],
+) -> SegmentErrors:
+    """Compute the single-step and rollout errors of one predicted segment.
+
+    **Arguments:**
+
+    - `u_pred`: The predicted frames.
+    - `u_data`: The reference frames at the same steps.
+    """
+    return SegmentErrors(
+        l2_onestep=relative_L2_error(u_pred[0], u_data[0]),
+        l_inf_onestep=relative_L_infty_error(u_pred[0], u_data[0]),
+        l2_rollout=relative_L2_error(u_pred, u_data),
+        l_inf_rollout=relative_L_infty_error(u_pred, u_data),
+    )
+
+
+def largest_jump(u: Float[Array, " x"]) -> Float[Array, ""]:
+    """Return the largest absolute difference between neighboring cells of a periodic
+    1D field, including the pair that wraps around the boundary.
+
+    Action 5a of the rebuttal plan uses this number as the front strength of a
+    snapshot. A limited solver spreads a shock over two to three cells, so the number
+    is a lower bound on the jump across the shock.
+    """
+    return jnp.max(jnp.abs(jnp.roll(u, -1) - u))
+
+
+def count_jumps(u: Float[Array, " x"]) -> Int[Array, ""]:
+    """Count the neighboring pairs of a periodic 1D field whose values differ.
+
+    The comparison is exact, so the count is meaningful for a piecewise-constant field
+    such as a step initial condition, where it is the number of discontinuities. A
+    constant field gives 0.
+    """
+    return jnp.sum(jnp.roll(u, -1) != u)

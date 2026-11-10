@@ -1,10 +1,15 @@
-"""Rollout evaluation of trained models on a set of test trajectories.
+"""Evaluation of trained models on a set of test trajectories.
 
 This module computes the rollout diagnostics of `context_flux_no.metrics` (D1 to D6 of
 the ICLR 2027 rebuttal plan, action 2b). `evaluate_rollouts` and `evaluate_references`
 run on the accelerator, and `summarize_rollouts` reduces their per-step arrays on the
 host. `scripts/evaluation/rollout_diagnostics.py` applies them to the test sets of the
 paper.
+
+The module also computes the errors of every segment of a test set (actions 5a and
+5b). `evaluate_segments` and `evaluate_segment_baselines` run on the accelerator, and
+`match_trajectories` and `mean_by_bin` group their results on the host.
+`scripts/evaluation/segment_errors.py` applies them to the shallow-water test sets.
 """
 
 import dataclasses
@@ -15,7 +20,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Bool, Float
+from jaxtyping import Array, Bool, Float, Int
 
 from .metrics import (
     error_power_spectrum,
@@ -25,6 +30,9 @@ from .metrics import (
     rollout_references,
     RolloutDiagnostics,
     RolloutReferences,
+    segment_errors,
+    SegmentErrors,
+    spatial_mean_field,
     valid_horizon,
 )
 from .models.multiphysics.abstract import AbstractMultiphysicsOperator
@@ -364,3 +372,230 @@ def summarize_rollouts(
             nonpositive = np.any(minima[..., :horizon, :] <= 0.0, axis=-1)
         summary["fraction_nonpositive"] = _fraction_by_step(nonpositive, report_steps)
     return summary
+
+
+# --- Segment errors (ICLR 2027 rebuttal, actions 5a and 5b) -------------------------
+
+
+class SegmentBaselines(eqx.Module):
+    """Errors of the two baselines on the segments of a test set.
+
+    **Attributes:**
+
+    - `identity`: The errors of the identity baseline, which holds the last context
+        frame over the whole segment.
+    - `spatial_mean`: The errors of the spatial-mean baseline, which holds the cell
+        mean of each channel of the last context frame.
+    """
+
+    identity: SegmentErrors
+    spatial_mean: SegmentErrors
+
+
+def _check_window_starts(
+    window_starts: tuple[int, ...], num_frames: int, segment_length: int
+) -> None:
+    if not window_starts:
+        raise ValueError("window_starts is empty.")
+    last_start = num_frames - segment_length
+    if min(window_starts) < 0 or max(window_starts) > last_start:
+        raise ValueError(
+            f"window_starts must lie within 0 and {last_start} for {num_frames} "
+            f"frames and segments of {segment_length} frames, got {window_starts}."
+        )
+
+
+def _segments_of(
+    u: Float[Array, " frames channels *spatial_dims"],
+    window_starts: Int[Array, " windows"],
+    segment_length: int,
+) -> Float[Array, " windows {segment_length} channels *spatial_dims"]:
+    """Return the segments of one trajectory that begin at `window_starts`."""
+    return u[window_starts[:, None] + jnp.arange(segment_length)]
+
+
+def _map_over_chunks(evaluate_chunk, trajectories: np.ndarray, chunk_size: int):
+    """Apply a jitted function to chunks of trajectories and join the results on the
+    host."""
+    chunks = [
+        jax.tree.map(
+            np.asarray,
+            evaluate_chunk(jnp.asarray(trajectories[start : start + chunk_size])),
+        )
+        for start in range(0, trajectories.shape[0], chunk_size)
+    ]
+    return jax.tree.map(lambda *xs: np.concatenate(xs), *chunks)
+
+
+def evaluate_segments(
+    model: AbstractMultiphysicsOperator,
+    trajectories: Float[np.ndarray, " trajectories frames channels *spatial_dims"],
+    window_starts: tuple[int, ...],
+    model_args: Any,
+    *,
+    context_length: int,
+    rollout_steps: int,
+    chunk_size: int = 1000,
+    batch_size: int = 16,
+) -> SegmentErrors:
+    """Compute the errors of a model on every segment of every trajectory.
+
+    A segment begins at one of `window_starts`. Its first `context_length` frames are
+    the context, and the model predicts the next `rollout_steps` frames
+    autoregressively. This is the evaluation of the submission, which
+    `notebooks/evaluation/evaluate_shallow.ipynb` runs with every window start, except
+    that the errors of the segments are returned and not averaged.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `trajectories`: The test trajectories. The array stays on the host.
+    - `window_starts`: The frame indices at which segments begin.
+    - `model_args`: The `args` of `model.rollout`, such as `(dt, dx)`.
+    - `context_length`: The number of context frames.
+    - `rollout_steps`: The number of predicted frames.
+    - `chunk_size`: The number of trajectories that are moved to the device at once.
+    - `batch_size`: The number of trajectories whose segments run in parallel on the
+        device. The number of parallel rollouts is `batch_size * len(window_starts)`.
+
+    **Returns:**
+
+    A `SegmentErrors` whose fields are NumPy arrays of shape `(trajectories, windows)`.
+    """
+    segment_length = context_length + rollout_steps
+    _check_window_starts(window_starts, trajectories.shape[1], segment_length)
+    starts = jnp.asarray(window_starts)
+
+    def one_segment(model, segment):
+        context, u_data = segment[:context_length], segment[context_length:]
+        u_pred = model.rollout(context, model_args, num_steps=rollout_steps)[0]
+        return segment_errors(u_pred, u_data)
+
+    @eqx.filter_jit
+    def evaluate_chunk(model, u_chunk):
+        return jax.lax.map(
+            lambda u: jax.vmap(lambda segment: one_segment(model, segment))(
+                _segments_of(u, starts, segment_length)
+            ),
+            u_chunk,
+            batch_size=batch_size,
+        )
+
+    return _map_over_chunks(
+        lambda u_chunk: evaluate_chunk(model, u_chunk), trajectories, chunk_size
+    )
+
+
+def evaluate_segment_baselines(
+    trajectories: Float[np.ndarray, " trajectories frames channels *spatial_dims"],
+    window_starts: tuple[int, ...],
+    *,
+    context_length: int,
+    rollout_steps: int,
+    chunk_size: int = 1000,
+) -> SegmentBaselines:
+    """Compute the errors of the two baselines on the segments of `evaluate_segments`.
+
+    **Returns:**
+
+    A `SegmentBaselines` whose arrays have the shape `(trajectories, windows)`.
+    """
+    segment_length = context_length + rollout_steps
+    _check_window_starts(window_starts, trajectories.shape[1], segment_length)
+    starts = jnp.asarray(window_starts)
+
+    def one_segment(segment):
+        last, u_data = segment[context_length - 1], segment[context_length:]
+        return SegmentBaselines(
+            identity=segment_errors(jnp.broadcast_to(last, u_data.shape), u_data),
+            spatial_mean=segment_errors(
+                jnp.broadcast_to(spatial_mean_field(last), u_data.shape), u_data
+            ),
+        )
+
+    @jax.jit
+    def evaluate_chunk(u_chunk):
+        return jax.vmap(
+            lambda u: jax.vmap(one_segment)(_segments_of(u, starts, segment_length))
+        )(u_chunk)
+
+    return _map_over_chunks(evaluate_chunk, trajectories, chunk_size)
+
+
+def match_trajectories(
+    fields: Float[np.ndarray, " n *shape"],
+    coefficients: Float[np.ndarray, " n params"],
+    partner_fields: Float[np.ndarray, " m *shape"],
+    partner_coefficients: Float[np.ndarray, " m params"],
+    *,
+    atol: float,
+) -> Int[np.ndarray, " n"]:
+    """Find, for each trajectory of one test set, its partner in a paired test set.
+
+    Two trajectories are partners when their coefficients are equal and their `fields`
+    agree within `atol` in every entry. `fields` is a quantity that pairing leaves
+    unchanged, such as the initial momentum of two shallow-water sets that differ in
+    the initial depth only.
+
+    **Returns:**
+
+    The index of the partner of each trajectory, or -1 for a trajectory without one.
+
+    **Raises:**
+
+    `ValueError` if two trajectories share a partner, because the sets are then not
+    paired one to one.
+    """
+    by_coefficients: dict[bytes, list[int]] = {}
+    for index, row in enumerate(np.ascontiguousarray(partner_coefficients)):
+        by_coefficients.setdefault(row.tobytes(), []).append(index)
+
+    partners = np.full(len(fields), -1, dtype=np.int64)
+    for index, row in enumerate(np.ascontiguousarray(coefficients)):
+        candidates = np.asarray(by_coefficients.get(row.tobytes(), []), dtype=np.int64)
+        if candidates.size == 0:
+            continue
+        distance = np.abs(partner_fields[candidates] - fields[index]).reshape(
+            len(candidates), -1
+        )
+        distance = distance.max(axis=1)
+        if distance.min() <= atol:
+            partners[index] = candidates[distance.argmin()]
+
+    matched = partners[partners >= 0]
+    if len(np.unique(matched)) != len(matched):
+        raise ValueError("Two trajectories share a partner; the sets are not paired.")
+    return partners
+
+
+def mean_by_bin(
+    values: Float[np.ndarray, " *batch n"],
+    bin_indices: Int[np.ndarray, " n"],
+    num_bins: int,
+) -> tuple[Float[np.ndarray, " *batch {num_bins}"], Int[np.ndarray, " {num_bins}"]]:
+    """Average `values` over the entries of each bin.
+
+    **Arguments:**
+
+    - `values`: The values, with the binned axis last.
+    - `bin_indices`: The bin of each entry of that axis. An entry with an index outside
+        0 to `num_bins - 1` belongs to no bin.
+    - `num_bins`: The number of bins.
+
+    **Returns:**
+
+    The mean per bin, which is NaN for an empty bin, and the number of entries per bin.
+    A non-finite value makes the mean of its bin non-finite.
+    """
+    in_range = (bin_indices >= 0) & (bin_indices < num_bins)
+    counts = np.bincount(bin_indices[in_range], minlength=num_bins)
+    one_hot = bin_indices[:, None] == np.arange(num_bins)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        means = (
+            np.stack(
+                [values[..., one_hot[:, b]].sum(axis=-1) for b in range(num_bins)],
+                axis=-1,
+            )
+            / counts
+        )
+    return means, counts
