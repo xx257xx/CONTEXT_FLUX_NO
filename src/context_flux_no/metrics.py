@@ -165,14 +165,14 @@ class RolloutReferences(eqx.Module):
 
     **Attributes:**
 
-    - `l2_persistence`: The relative l2 error of the prediction that holds the last
+    - `l2_identity`: The relative l2 error of the prediction that holds the last
         context state over the whole rollout (D1).
     - `l2_spatial_mean`: The relative l2 error of the prediction that holds the cell
         mean of each channel of the last context state (D1).
     - `total_variation`: The total variation of the first channel of the reference.
     """
 
-    l2_persistence: Float[Array, " steps"]
+    l2_identity: Float[Array, " steps"]
     l2_spatial_mean: Float[Array, " steps"]
     total_variation: Float[Array, " steps"]
 
@@ -188,10 +188,10 @@ def rollout_references(
     - `u_context_last`: The last state of the context window.
     - `u_data`: The reference solution at the steps of the rollout.
     """
-    persistence = jnp.broadcast_to(u_context_last, u_data.shape)
+    identity = jnp.broadcast_to(u_context_last, u_data.shape)
     spatial_mean = jnp.broadcast_to(spatial_mean_field(u_context_last), u_data.shape)
     return RolloutReferences(
-        l2_persistence=jax.vmap(relative_L2_error)(persistence, u_data),
+        l2_identity=jax.vmap(relative_L2_error)(identity, u_data),
         l2_spatial_mean=jax.vmap(relative_L2_error)(spatial_mean, u_data),
         total_variation=jax.vmap(total_variation)(u_data[:, 0]),
     )
@@ -261,16 +261,84 @@ def first_true_step(
 
 def valid_horizon(
     l2: Float[np.ndarray, " *batch steps"],
-    l2_persistence: Float[np.ndarray, " *batch steps"],
+    l2_identity: Float[np.ndarray, " *batch steps"],
     nonfinite: Bool[np.ndarray, " *batch steps"],
 ) -> Int[np.ndarray, " *batch"]:
-    """Return the first step at which a rollout is no better than persistence (D2).
+    """Return the first step at which a rollout is no better than the identity
+    baseline (D2).
 
-    The valid horizon is the first step `n` with `l2[n] >= l2_persistence[n]`. A step
+    The valid horizon is the first step `n` with `l2[n] >= l2_identity[n]`. A step
     with a non-finite prediction also ends it. Steps are counted from 1, and a rollout
-    that stays below the persistence error receives `steps + 1`, so the caller can tell
-    it apart from a rollout that crosses at the last step.
+    that stays below the identity-baseline error receives `steps + 1`, so the caller
+    can tell it apart from a rollout that crosses at the last step.
     """
     with np.errstate(invalid="ignore"):
-        no_better = l2 >= l2_persistence
+        no_better = l2 >= l2_identity
     return first_true_step(no_better | nonfinite | ~np.isfinite(l2))
+
+
+# --- Segment errors and front measures (ICLR 2027 rebuttal, actions 5a and 5b) ------
+#
+# A segment is a context window followed by the frames that a model predicts from it.
+# The definitions below act on one segment or one snapshot and are left undecorated.
+
+
+class SegmentErrors(eqx.Module):
+    """Errors of one prediction over one segment, in the metrics of the submission.
+
+    The four numbers are those of `compute_metrics` in the evaluation notebooks of the
+    submission, such as `notebooks/evaluation/evaluate_shallow.ipynb`.
+
+    **Attributes:**
+
+    - `l2_onestep`: The relative l2 error of the first predicted frame.
+    - `l_inf_onestep`: The relative l-infinity error of the first predicted frame.
+    - `l2_rollout`: The relative l2 error of all predicted frames, with one norm over
+        time, channels and space.
+    - `l_inf_rollout`: The relative l-infinity error of all predicted frames.
+    """
+
+    l2_onestep: Float[Array, ""]
+    l_inf_onestep: Float[Array, ""]
+    l2_rollout: Float[Array, ""]
+    l_inf_rollout: Float[Array, ""]
+
+
+def segment_errors(
+    u_pred: Float[Array, " steps channels *spatial_dims"],
+    u_data: Float[Array, " steps channels *spatial_dims"],
+) -> SegmentErrors:
+    """Compute the single-step and rollout errors of one predicted segment.
+
+    **Arguments:**
+
+    - `u_pred`: The predicted frames.
+    - `u_data`: The reference frames at the same steps.
+    """
+    return SegmentErrors(
+        l2_onestep=relative_L2_error(u_pred[0], u_data[0]),
+        l_inf_onestep=relative_L_infty_error(u_pred[0], u_data[0]),
+        l2_rollout=relative_L2_error(u_pred, u_data),
+        l_inf_rollout=relative_L_infty_error(u_pred, u_data),
+    )
+
+
+def largest_jump(u: Float[Array, " x"]) -> Float[Array, ""]:
+    """Return the largest absolute difference between neighboring cells of a periodic
+    1D field, including the pair that wraps around the boundary.
+
+    Action 5a of the rebuttal plan uses this number as the front strength of a
+    snapshot. A limited solver spreads a shock over two to three cells, so the number
+    is a lower bound on the jump across the shock.
+    """
+    return jnp.max(jnp.abs(jnp.roll(u, -1) - u))
+
+
+def count_jumps(u: Float[Array, " x"]) -> Int[Array, ""]:
+    """Count the neighboring pairs of a periodic 1D field whose values differ.
+
+    The comparison is exact, so the count is meaningful for a piecewise-constant field
+    such as a step initial condition, where it is the number of discontinuities. A
+    constant field gives 0.
+    """
+    return jnp.sum(jnp.roll(u, -1) != u)

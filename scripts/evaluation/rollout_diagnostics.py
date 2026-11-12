@@ -460,7 +460,7 @@ def print_summary(
     results: dict[str, list[RolloutEvaluation]], references: RolloutReferences
 ) -> None:
     """Print the summary of D2 to D5 for every model, pooled over its seeds."""
-    num_steps = references.l2_persistence.shape[-1]
+    num_steps = references.l2_identity.shape[-1]
     horizon = min(SUMMARY_HORIZON, num_steps)
     report_steps = tuple(step for step in SUMMARY_STEPS if step <= horizon)
     if horizon < SUMMARY_HORIZON:

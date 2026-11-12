@@ -7,15 +7,18 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from context_flux_no.metrics import (
+    count_jumps,
     error_area_fraction,
     error_power_spectrum,
     first_true_step,
     ideal_gas_pressure,
+    largest_jump,
     radial_power_spectrum,
     relative_L2_error,
     relative_L2_error_per_channel,
     rollout_diagnostics,
     rollout_references,
+    segment_errors,
     total_variation,
     valid_horizon,
 )
@@ -94,13 +97,13 @@ def test_ideal_gas_pressure_inverts_the_energy():
 def test_rollout_references_of_a_translating_wave():
     # u(x, t) = 1 + sin(2 pi (x - t)) has mean 1 and fluctuation power 1/2, so the
     # spatial-mean error is sqrt((1/2) / (3/2)). After a shift of half a period the
-    # wave is 1 - sin, so the persistence error is sqrt(2 / (3/2)).
+    # wave is 1 - sin, so the identity-baseline error is sqrt(2 / (3/2)).
     x = _grid(64)
     shifts = jnp.array([0.0, 0.25, 0.5])
     u = (1.0 + jnp.sin(2 * jnp.pi * (x - shifts[:, None])))[:, None]
     references = rollout_references(u[0], u[1:])
     assert jnp.allclose(references.l2_spatial_mean, jnp.sqrt(1 / 3), atol=ATOL)
-    assert jnp.allclose(references.l2_persistence[1], jnp.sqrt(4 / 3), atol=ATOL)
+    assert jnp.allclose(references.l2_identity[1], jnp.sqrt(4 / 3), atol=ATOL)
     assert jnp.allclose(references.total_variation, 4.0, atol=ATOL)
 
 
@@ -120,14 +123,37 @@ def test_first_true_step_counts_from_one():
 
 
 def test_valid_horizon():
-    l2_persistence = np.array([0.1, 0.2, 0.3, 0.4])
+    l2_identity = np.array([0.1, 0.2, 0.3, 0.4])
     l2 = np.array(
         [
-            [0.05, 0.1, 0.3, 0.2],  # reaches persistence at step 3
-            [0.2, 0.1, 0.1, 0.1],  # above persistence at step 1 only
+            [0.05, 0.1, 0.3, 0.2],  # reaches the baseline at step 3
+            [0.2, 0.1, 0.1, 0.1],  # above the baseline at step 1 only
             [0.0, 0.1, 0.2, 0.3],  # never reaches it
             [0.0, np.nan, np.nan, np.nan],  # non-finite from step 2
         ]
     )
     nonfinite = np.isnan(l2)
-    assert valid_horizon(l2, l2_persistence, nonfinite).tolist() == [3, 1, 5, 2]
+    assert valid_horizon(l2, l2_identity, nonfinite).tolist() == [3, 1, 5, 2]
+
+
+def test_segment_errors_of_a_constant_offset():
+    # The reference is 1 in the first frame and 2 in the second, and the prediction is
+    # off by 0.5 in the first frame and by 1 in the second. The single-step errors are
+    # 0.5 / 1. The rollout l2 error is sqrt(0.25 + 1) / sqrt(1 + 4) = 0.5, and the
+    # rollout l-infinity error is 1 / 2.
+    u_data = jnp.stack((jnp.ones((2, 8)), 2 * jnp.ones((2, 8))))
+    u_pred = u_data + jnp.asarray([0.5, 1.0])[:, None, None]
+    errors = segment_errors(u_pred, u_data)
+    assert jnp.allclose(errors.l2_onestep, 0.5, atol=ATOL)
+    assert jnp.allclose(errors.l_inf_onestep, 0.5, atol=ATOL)
+    assert jnp.allclose(errors.l2_rollout, 0.5, atol=ATOL)
+    assert jnp.allclose(errors.l_inf_rollout, 0.5, atol=ATOL)
+
+
+def test_jumps_of_a_step_function():
+    # Three plateaus on a periodic grid have three discontinuities, the one across
+    # the boundary included, and the largest is the one from 4 down to 0.5.
+    u = jnp.asarray([0.5, 0.5, 2.0, 2.0, 2.0, 4.0, 4.0, 4.0])
+    assert int(count_jumps(u)) == 3
+    assert jnp.allclose(largest_jump(u), 3.5, atol=ATOL)
+    assert int(count_jumps(jnp.full(8, 1.5))) == 0
