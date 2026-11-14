@@ -68,6 +68,13 @@ PRESETS: dict[str, dict[str, Any]] = {
     "shallow_water_1d_shock": {
         "data_path": "shallow_water_1d_test_step_grf_seed=10.hdf5",
     },
+    # The shock set regenerated with the coefficients and the m(0) of the training
+    # set. The two presets around it read sets with beta in [8, 12], ten times the
+    # training range.
+    "shallow_water_1d_shock_v2": {
+        "data_path": "datasets/shallow_water_1d/data/test/"
+        "shallow_water_1d_test_step_v2_grf_seed=10.hdf5",
+    },
     "shallow_water_1d_shock_low": {
         "data_path": "datasets/shallow_water_1d/data/test/"
         "shallow_water_1d_test_step_low_grf_seed=10.hdf5",

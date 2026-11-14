@@ -1,16 +1,29 @@
-"""Generate a shock-dominated shallow-water test set with a chosen plateau range.
+"""Generate a shock-dominated shallow-water test set from the training family.
 
-This script writes the low set of the ICLR 2027 rebuttal plan (action 5b): the
-shock-dominated test set of Section B.3 with the plateau values of h(0) drawn from
-[0.5, 2.0] instead of [0.5, 4.5]. Everything else follows the submitted set: the
-coefficient ranges, the Gaussian random field of m(0), the Roe solver and the grid.
+This script writes the corrected shock-dominated test set of the 1D shallow-water
+family (ICLR 2027 rebuttal plan, item 5). h(0) is a periodic random step function with
+plateau values in [0.5, 4.5]. The coefficients and m(0) follow the training set: alpha
+and gamma in [0.5, 1.5], beta in [0.8, 1.2], and a Gaussian random field with variance
+1 for m(0) (`configs/pde/shallow_water_1d.yaml`, `configs/initial_condition/
+grf_shallow.yaml`). The set therefore changes the initial condition of h and nothing
+else.
 
-The set is paired with the submitted one. It repeats the key derivation of the
-generator that wrote the submitted set, and a plateau value is an affine map of one
-uniform draw. Trajectory (i, j) of both sets therefore has the same coefficients, the
-same jump positions and the same m(0), and the two h(0) are related by
-h_low = 0.5 + (h_submitted - 0.5) * 1.5 / 4. `plateau_range=[0.5,4.5]` regenerates the
-submitted set, which checks the derivation.
+The submitted shock set, `shallow_water_1d_test_step_grf_seed=10.hdf5`, does not have
+this property. Cell 12 of `notebooks/data_generation/shallow_water_1D.ipynb` wrote it
+with beta in [8, 12] and variance 0.5 for m(0), while every training, validation and
+in-distribution test file has beta in [0.8, 1.2] and variance 1. Its gravity waves are
+about 3.2 times faster than any that the models saw in training.
+
+The keys are those of the in-distribution test set: the base key of the test split,
+seed 10, and the coefficients sampled in the order of the configuration. The 100
+coefficient draws of the two sets are then the same.
+
+Every range is a configuration value. The following overrides reproduce the submitted
+set, whose first trajectory has the coefficients and the plateau value that cell 13 of
+the notebook prints:
+
+    base_key=0 momentum_variance=0.5 set_name=submitted \
+    'coeff_ranges=[[gamma,0.5,1.5],[alpha,0.5,1.5],[beta,8,12]]'
 
 The file has the layout of the submitted shallow-water sets, with the dimensions
 (ic, t, dim, x), so the evaluation code reads it unchanged. Two variables are added:
@@ -55,27 +68,41 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
-# Coefficient ranges of Section B.3, in the order of the dictionary that generated the
-# submitted set (notebooks/data_generation/shallow_water_1D.ipynb, cell 12). The order
-# decides which key samples which coefficient. The names are those of
-# `ParametrizedShallowWater1D`, where `gamma` multiplies m in the mass flux.
-COEFF_RANGES: dict[str, tuple[float, float]] = {
-    "gamma": (0.5, 1.5),
-    "alpha": (0.5, 1.5),
-    "beta": (8.0, 12.0),
-}
-
-# Covariance of m(0) in Section B.3: variance 0.5 and length scale 0.3.
-MOMENTUM_VARIANCE = 0.5
-MOMENTUM_LENGTH_SCALE = 0.3
+# The coefficients of `ParametrizedShallowWater1D`, where `gamma` multiplies m in the
+# mass flux and `alpha` multiplies m^2 / h, the reverse of the notation of Section B.3.
+COEFFICIENT_NAMES = frozenset({"alpha", "gamma", "beta"})
 
 
-def make_initial_condition(plateau_range: tuple[float, float]) -> MultichannelWaveform:
-    """Return the sampler of (h(0), m(0)) of the shock-dominated set.
+def coefficient_ranges(cfg: DictConfig) -> dict[str, tuple[float, float]]:
+    """Return the coefficient ranges of the configuration, in its order.
 
-    h(0) is a periodic random step function with plateau values in `plateau_range`, and
-    m(0) is the Gaussian random field of the training set. The construction is that of
-    the submitted set, so the same key gives the same jump positions and the same m(0).
+    The configuration lists the ranges as `[name, lower, upper]` entries. The order
+    decides which key samples which coefficient, so it is part of what makes two sets
+    share their coefficient draws. A list is used because a command-line override
+    replaces a list, while it merges into a mapping and keeps the old order.
+    """
+    names = [str(entry[0]) for entry in cfg.coeff_ranges]
+    if sorted(names) != sorted(COEFFICIENT_NAMES):
+        raise ValueError(
+            f"coeff_ranges must name each of {sorted(COEFFICIENT_NAMES)} once, "
+            f"got {names}."
+        )
+    return {
+        str(name): (float(lower), float(upper))
+        for name, lower, upper in cfg.coeff_ranges
+    }
+
+
+def make_initial_condition(
+    plateau_range: tuple[float, float],
+    momentum_variance: float,
+    momentum_length_scale: float,
+) -> MultichannelWaveform:
+    """Return the sampler of (h(0), m(0)) of a shock-dominated set.
+
+    h(0) is a periodic random step function with plateau values in `plateau_range`.
+    m(0) is a Gaussian random field with a Gaussian covariance of the given variance
+    and length scale.
     """
     value_min, value_max = plateau_range
     return MultichannelWaveform(
@@ -84,7 +111,7 @@ def make_initial_condition(plateau_range: tuple[float, float]) -> MultichannelWa
             GaussianRandomField(
                 covariance_fns=[
                     gs.Gaussian(
-                        dim=1, var=MOMENTUM_VARIANCE, len_scale=MOMENTUM_LENGTH_SCALE
+                        dim=1, var=momentum_variance, len_scale=momentum_length_scale
                     )
                 ],
                 means=None,
@@ -137,7 +164,10 @@ def main(cfg: DictConfig) -> None:
             f"n_ics_per_coeff={cfg.n_ics_per_coeff}."
         )
 
-    initial_condition = make_initial_condition(tuple(cfg.plateau_range))
+    initial_condition = make_initial_condition(
+        tuple(cfg.plateau_range), cfg.momentum_variance, cfg.momentum_length_scale
+    )
+    coeff_ranges = coefficient_ranges(cfg)
 
     # One key per coefficient draw, split into one key for the coefficients and one
     # per initial condition. The keys are split at the full sizes and then truncated,
@@ -155,7 +185,7 @@ def main(cfg: DictConfig) -> None:
     for i, key in enumerate(tqdm(keys[:num_draws])):
         key_coeff, *keys_ic = jax.random.split(key, cfg.n_ics_per_coeff + 1)
         pde = ParametrizedShallowWater1D(
-            **sample_coefficients_uniform(key_coeff, COEFF_RANGES)
+            **sample_coefficients_uniform(key_coeff, coeff_ranges)
         )
         param_names = list(pde.coeffs.keys())
 
@@ -204,6 +234,9 @@ def main(cfg: DictConfig) -> None:
         coords={"t": t, "dim": ["u_0", "u_1"], "x": x, "param": param_names},
         attrs={
             "plateau_range": [float(v) for v in cfg.plateau_range],
+            "momentum_variance": float(cfg.momentum_variance),
+            "momentum_length_scale": float(cfg.momentum_length_scale),
+            "coeff_ranges": str(coeff_ranges),
             "seed": int(cfg.seed),
             "base_key": int(cfg.base_key),
             "n_coeffs": int(cfg.n_coeffs),

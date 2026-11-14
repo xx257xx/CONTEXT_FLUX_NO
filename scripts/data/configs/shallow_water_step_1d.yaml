@@ -1,5 +1,5 @@
-# Shock-dominated shallow-water test set with a chosen plateau range (ICLR 2027
-# rebuttal, action 5b). Read by scripts/data/generate_shallow_water_step_1d.py.
+# Shock-dominated shallow-water test set from the training family (ICLR 2027 rebuttal,
+# item 5). Read by scripts/data/generate_shallow_water_step_1d.py.
 defaults:
   - override hydra/launcher: submitit_slurm
   - _self_
@@ -10,25 +10,37 @@ hydra:
     tasks_per_node: 1
     gpus_per_node: 1
 
-# Range of the plateau values of h(0). [0.5, 2.0] is the low set of the rebuttal plan,
-# the 16th to 84th percentile of the training h. [0.5, 4.5] repeats the submitted set.
-plateau_range: [0.5, 2.0]
+# Range of the plateau values of h(0), as in Section B.3.
+plateau_range: [0.5, 4.5]
 
 # Name of the set in the file name: shallow_water_1d_test_step_{set_name}_grf_seed=...
-set_name: low
+# "v2" is the corrected set. The submitted set has no such part in its name.
+set_name: v2
 
-# Key derivation of the submitted shock set, which notebook cell 12 of
-# notebooks/data_generation/shallow_water_1D.ipynb generated with seed=10 and the
-# default dataset_type="train" (base key 0). These four values stay fixed for a set
-# that is paired with it.
+# m(0): Gaussian random field with a Gaussian covariance, as the second field of
+# configs/initial_condition/grf_shallow.yaml, which generated the training set.
+momentum_variance: 1.0
+momentum_length_scale: 0.3
+
+# Coefficient ranges of the training set as [name, lower, upper], in the order of
+# configs/pde/shallow_water_1d.yaml. The order decides which key samples which
+# coefficient.
+coeff_ranges:
+  - [alpha, 0.5, 1.5]
+  - [gamma, 0.5, 1.5]
+  - [beta, 0.8, 1.2]
+
+# Key derivation of the in-distribution test set: the base key of the test split
+# (`BASE_KEY_DICT` in context_flux_no.simulations.utils) and seed 10. The two sets
+# then share their 100 coefficient draws.
 seed: 10
-base_key: 0
+base_key: 2
 n_coeffs: 100
 n_ics_per_coeff: 100
 
 # null solves every trajectory. An integer k solves the first k initial conditions of
 # the first k coefficient draws, with the keys of the full set, and writes a separate
-# file. The pilot of the rebuttal plan is 10.
+# file.
 pilot_size: null
 
 x_span: [0.0, 1.0]
