@@ -1,7 +1,8 @@
 """Godunov Riemann solvers for scalar conservation laws with a nonconvex flux.
 
 Used by `scripts/data/generate_unseen_flux_1d.py` and
-`scripts/data/check_cubic_entropy_fix.py`. The solvers of `cubic.py` and `sine_1d.py`
+`scripts/data/check_cubic_entropy_fix.py`. The fluxes are the sine, the cubic and the
+Buckley-Leverett flux. The solvers of `cubic.py` and `sine_1d.py`
 are left as they were for the ICLR 2027 submission.
 
 For u_t + f(u)_x = 0, the Godunov flux between the states q_l and q_r is
@@ -152,6 +153,81 @@ def riemann_cubic_godunov_1D(
         f_min=np.minimum.reduce(candidates),
         f_max=np.maximum.reduce(candidates),
         speed_l=(3.0 * a * q_l + 2.0 * b) * q_l + c,
+    )
+
+
+def buckley_leverett_fractional_flow(
+    s: Float[np.ndarray, "*shape"], mobility_ratio: float
+) -> Float[np.ndarray, "*shape"]:
+    """Fractional-flow function h(s) = s^2 / (s^2 + M (1 - s)^2) of the Buckley-Leverett
+    equation, with s the saturation and M the mobility ratio (Buckley and Leverett
+    1942, Trans. AIME 146; the form used in LeVeque 2002, Section 16.1.1).
+
+    The function is smooth on the whole real line for M > 0, since the denominator is
+    at least M / (1 + M). Saturations are physical on [0, 1].
+    """
+    return s**2 / (s**2 + mobility_ratio * (1.0 - s) ** 2)
+
+
+def buckley_leverett_speed(
+    s: Float[np.ndarray, "*shape"], mobility_ratio: float
+) -> Float[np.ndarray, "*shape"]:
+    """Derivative h'(s) = 2 M s (1 - s) / (s^2 + M (1 - s)^2)^2 of
+    `buckley_leverett_fractional_flow`. It is positive inside (0, 1), zero at s = 0
+    and s = 1, and negative outside [0, 1]."""
+    denominator = s**2 + mobility_ratio * (1.0 - s) ** 2
+    return 2.0 * mobility_ratio * s * (1.0 - s) / denominator**2
+
+
+def buckley_leverett_max_speed(mobility_ratio: float) -> float:
+    """Maximum of h'(s) over [0, 1], from 100001 equispaced samples.
+
+    For M between 0.1 and 10 this is also the largest |h'(s)| over the real line: the
+    values outside [0, 1] stay below half of it (checked numerically at
+    M = 0.1, 0.2, 0.5, 1, 2, 5, 10).
+    """
+    s = np.linspace(0.0, 1.0, 100001)
+    return float(np.max(buckley_leverett_speed(s, mobility_ratio)))
+
+
+def riemann_buckley_leverett_godunov_1D(
+    q_l: Float[np.ndarray, "1 num_riemanns"],
+    q_r: Float[np.ndarray, "1 num_riemanns"],
+    aux_l: Float[np.ndarray, "num_aux num_riemanns"],
+    aux_r: Float[np.ndarray, "num_aux num_riemanns"],
+    problem_data: dict[str, float],
+) -> RiemannOutput:
+    """Godunov Riemann solver for the Buckley-Leverett flux in the variable u = 2 s - 1.
+
+    The saturation s in [0, 1] is mapped to u in [-1, 1], the range of the step initial
+    conditions. The law s_t + (a h(s))_x = 0 then reads u_t + f(u)_x = 0 with
+    f(u) = 2 a h((1 + u) / 2), so that f'(u) = a h'(s). `problem_data` holds the
+    amplitude `a` and the mobility ratio `M`.
+
+    The range of the flux between the two states is exact: f' vanishes only at
+    u = -1 and u = 1, so the range is attained at a state or at one of these points.
+    """
+    a, mobility_ratio = problem_data["a"], problem_data["M"]
+
+    def flux(u: Float[np.ndarray, "*shape"]) -> Float[np.ndarray, "*shape"]:
+        return (
+            2.0 * a * buckley_leverett_fractional_flow(0.5 * (1.0 + u), mobility_ratio)
+        )
+
+    q_lo, q_hi = np.minimum(q_l, q_r), np.maximum(q_l, q_r)
+    f_l, f_r = flux(q_l), flux(q_r)
+    # A critical point clipped to [q_lo, q_hi] is the point itself when it lies between
+    # the states and one of the states otherwise, so it never widens the range.
+    candidates = [f_l, f_r] + [flux(np.clip(root, q_lo, q_hi)) for root in (-1.0, 1.0)]
+
+    return _godunov_fluctuations(
+        q_l,
+        q_r,
+        f_l=f_l,
+        f_r=f_r,
+        f_min=np.minimum.reduce(candidates),
+        f_max=np.maximum.reduce(candidates),
+        speed_l=a * buckley_leverett_speed(0.5 * (1.0 + q_l), mobility_ratio),
     )
 
 

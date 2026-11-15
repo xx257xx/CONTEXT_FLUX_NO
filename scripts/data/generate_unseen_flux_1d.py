@@ -10,24 +10,29 @@ Three flux families are available (`flux` in `configs/unseen_flux_1d.yaml`):
     wave speed is |a'| for every b, so only the shape of the flux changes with the bin.
 - `cubic_shell`: the cubic flux with coefficients outside the training box, binned by
     the largest absolute coefficient.
+- `buckley_leverett`: the Buckley-Leverett flux of two-phase flow, scaled to a fixed
+    maximum wave speed and binned by |log10 M| of the mobility ratio M. It is meant
+    for the step initial conditions, whose plateaus in [-1, 1] are saturations in
+    [0, 1]. States of the GRF family leave that range.
 - `sine_box`: f(u) = a sin(b u) with (a, b) ~ U[-1, 1]^2. With `seed=12` it repeats
     the key derivation of the submitted sine sets, and so solves the same problems with
     the conservative solver.
 
-The sine sets are solved with the Godunov solver of
+The sine and Buckley-Leverett sets are solved with the Godunov solvers of
 `context_flux_no.simulations.pde.godunov_1d`. The cubic sets are solved with
 `CubicFlux1D.solve`, the solver of the submitted cubic sets.
 
-Every set of one seed uses the same initial conditions, and the sine bins share the
-draws of a' and of the sign of b. The error of a model against the bin then varies
-only with the flux.
+Every set of one seed uses the same initial conditions, and the bins of one family
+share the draws of the amplitude and of the sign of the shape parameter. The error of
+a model against the bin then varies only with the flux.
 
-Example usage, all twelve new sets and then the control set:
+Example usage, the eight sine sets of the shape axis and the three Buckley-Leverett
+sets:
 
     uv run python scripts/data/generate_unseen_flux_1d.py --multirun \
-        flux=sine_rescaled,cubic_shell bin_index=0,1,2 initial_condition_name=grf,step
+        flux=sine_rescaled bin_index=0,1,2,3 initial_condition_name=grf,step_min2
     uv run python scripts/data/generate_unseen_flux_1d.py --multirun \
-        flux=sine_box initial_condition_name=grf,step seed=12
+        flux=buckley_leverett bin_index=0,1,2
 """
 
 import logging
@@ -40,7 +45,9 @@ import numpy as np
 import xarray as xr
 from context_flux_no.simulations.pde import CubicFlux1D
 from context_flux_no.simulations.pde.godunov_1d import (
+    buckley_leverett_max_speed,
     make_scalar_godunov_solver,
+    riemann_buckley_leverett_godunov_1D,
     riemann_sine_godunov_1D,
 )
 from context_flux_no.simulations.pdesolve import pdesolve_pyclaw
@@ -63,6 +70,14 @@ TEST_BASE_KEY = 2
 # the rebuttal plan, so all 64 are rejected with probability below 1e-18.
 NUM_SHELL_CANDIDATES = 64
 
+# Riemann solver of every flux family that is solved through `pdesolve_pyclaw`. The
+# family `cubic_shell` is solved with `CubicFlux1D.solve` and is not listed.
+GODUNOV_RIEMANN_SOLVERS = {
+    "sine_rescaled": riemann_sine_godunov_1D,
+    "sine_box": riemann_sine_godunov_1D,
+    "buckley_leverett": riemann_buckley_leverett_godunov_1D,
+}
+
 InitialConditionFn = Callable[
     [Float[np.ndarray, " Nx"], PRNGKeyArray], Float[Array, "1 Nx"]
 ]
@@ -74,18 +89,26 @@ Solution = tuple[
 
 
 def make_initial_condition(name: str) -> InitialConditionFn:
-    """Return the sampler of an initial-condition family of Section B.2.
+    """Return the sampler of an initial-condition family.
 
-    `grf` is the periodic Gaussian random field with covariance
+    `grf` is the periodic Gaussian random field of Section B.2, with covariance
     exp(-(1 - cos(2 pi r))), which is `PeriodicCov(corr_length=1.0)`. The `grf` entry
     of `configs/initial_condition/` has a different kernel and is not used here.
-    `step` is the shock-dominated family with plateau values in [-1, 1].
+
+    `step` is the shock-dominated family of Section B.2: 1 to 5 jumps and plateau
+    values in [-1, 1]. A step function with one jump on a periodic domain has a single
+    plateau, so about a fifth of this family are constant states. A constant state
+    close to zero makes the relative error of a prediction arbitrarily large.
+
+    `step_min2` is the same family with 2 to 5 jumps, which has no constant states.
     """
     match name:
         case "grf":
             return GaussianRandomField1D(PeriodicCov(corr_length=1.0)).sample
         case "step":
             return PeriodicRandomStepFunction1D().sample
+        case "step_min2":
+            return PeriodicRandomStepFunction1D(num_jumps_min=2).sample
         case _:
             raise ValueError(f"Unknown initial condition: {name!r}")
 
@@ -109,6 +132,31 @@ def sample_sine_rescaled(
     b_abs = upper - (upper - lower) * float(jax.random.uniform(key_b))
     sign = 1.0 if bool(jax.random.bernoulli(key_sign)) else -1.0
     return {"a": amplitude / b_abs, "b": sign * b_abs}
+
+
+def sample_buckley_leverett(
+    key: PRNGKeyArray, log_ratio_bin: tuple[float, float]
+) -> dict[str, float]:
+    """Sample the coefficients of the Buckley-Leverett flux f(u) = 2 a h_M((1 + u) / 2).
+
+    |log10 M| is uniform on the half-open bin (lower, upper], and its sign is drawn at
+    random. The mobility ratios M and 1 / M give mirror-image fluxes,
+    h_{1/M}(s) = 1 - h_M(1 - s), so the sign plays the role of the sign of b of the
+    sine flux. The amplitude is a = a' / max h_M' with a' ~ U[-1, 1], which makes the
+    maximum wave speed |a'| for every M. Two bins sampled with the same key share a',
+    the sign and the position inside the bin.
+    """
+    lower, upper = log_ratio_bin
+    key_amplitude, key_ratio, key_sign = jax.random.split(key, 3)
+    amplitude = float(jax.random.uniform(key_amplitude, minval=-1.0, maxval=1.0))
+    # `jax.random.uniform` draws from [0, 1), which maps to (lower, upper].
+    log_ratio = upper - (upper - lower) * float(jax.random.uniform(key_ratio))
+    sign = 1.0 if bool(jax.random.bernoulli(key_sign)) else -1.0
+    mobility_ratio = 10.0 ** (sign * log_ratio)
+    return {
+        "a": amplitude / buckley_leverett_max_speed(mobility_ratio),
+        "M": mobility_ratio,
+    }
 
 
 def sample_cubic_shell(
@@ -142,7 +190,7 @@ def set_name(cfg: DictConfig) -> str:
     Raises if `bin_index` is missing for a binned family or given for `sine_box`.
     """
     match cfg.flux:
-        case "sine_rescaled" | "cubic_shell":
+        case "sine_rescaled" | "cubic_shell" | "buckley_leverett":
             if cfg.bin_index is None:
                 raise ValueError(f"flux={cfg.flux} needs a bin_index.")
             lower, upper = cfg.bins[cfg.flux][cfg.bin_index]
@@ -168,6 +216,10 @@ def sample_coefficients(key: PRNGKeyArray, cfg: DictConfig) -> dict[str, float]:
             )
         case "cubic_shell":
             return sample_cubic_shell(key, tuple(cfg.bins.cubic_shell[cfg.bin_index]))
+        case "buckley_leverett":
+            return sample_buckley_leverett(
+                key, tuple(cfg.bins.buckley_leverett[cfg.bin_index])
+            )
         case "sine_box":
             return sample_coefficients_uniform(
                 key, {"a": (-1.0, 1.0), "b": (-1.0, 1.0)}
@@ -194,7 +246,7 @@ def solve(
             verbose=False,
         )
     return pdesolve_pyclaw(
-        make_scalar_godunov_solver(riemann_sine_godunov_1D),
+        make_scalar_godunov_solver(GODUNOV_RIEMANN_SOLVERS[cfg.flux]),
         coeffs,
         initial_condition,
         x_spans,
@@ -293,7 +345,7 @@ def main(cfg: DictConfig) -> None:
             "riemann_solver": (
                 "riemann_cubic_1D"
                 if cfg.flux == "cubic_shell"
-                else "riemann_sine_godunov_1D"
+                else GODUNOV_RIEMANN_SOLVERS[cfg.flux].__name__
             ),
             "num_failed": int(failed.sum()),
         },
