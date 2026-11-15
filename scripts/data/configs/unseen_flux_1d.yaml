@@ -12,16 +12,20 @@ hydra:
 
 # sine_rescaled: f(u) = (a'/|b|) sin(b u), a' ~ U[-amplitude, amplitude], |b| in a bin.
 # cubic_shell:   the cubic flux with max|c_i| in a bin outside the training box.
+# buckley_leverett: f(u) = 2 a h_M((1 + u) / 2) with the fractional-flow function h_M,
+#                scaled to the maximum speed |a'|, a' ~ U[-1, 1], |log10 M| in a bin.
 # sine_box:      f(u) = a sin(b u), (a, b) ~ U[-1, 1]^2, the draws of the submitted set.
 flux: sine_rescaled
 
-# Index into bins[flux]. Required for sine_rescaled and cubic_shell, null for sine_box.
+# Index into bins[flux]. Null for sine_box, required for every other flux.
 bin_index: null
 bins:
   # The bin (0, 1] is last so that the indices of the first three bins keep their meaning.
   # It lies inside the training family and anchors the sweep at the speed of the other bins.
   sine_rescaled: [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0], [0.0, 1.0]]
   cubic_shell: [[1.0, 1.5], [1.5, 2.0], [2.0, 2.5]]
+  # Bins of |log10 M|: M or 1/M in (1, 2], (2, 5] and (5, 10], up to rounding of the edges.
+  buckley_leverett: [[0.0, 0.3], [0.3, 0.7], [0.7, 1.0]]
 
 # 1.0 is the agreed sweep. 2.0 is the fallback variant of the rebuttal plan.
 sine_amplitude_max: 1.0
