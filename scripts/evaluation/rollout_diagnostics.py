@@ -141,7 +141,8 @@ PRESETS: dict[str, dict[str, Any]] = {
     "cubic_1d_shock": {
         "loader": "legacy_hdf5",
         "data_path": "datasets/cubic_no_source/data/test/"
-        "sine_box_godunov_test_step_seed=12.hdf5",
+        "cubic_no_source_large_test_step_seed=10.hdf5",
+        "time_stride": 10,
         "checkpoint": _CUBIC_1D_CHECKPOINTS,
         "chunk_size": 10000,
         "batch_size": 2000,
@@ -218,6 +219,7 @@ DEFAULTS: dict[str, Any] = {
     "coefficient_name": None,
     "context_length": 20,
     "reference_file": None,
+    "exclude_constant_references": False,
     "limit": None,
     "chunk_size": 1000,
     "batch_size": 100,
@@ -457,9 +459,16 @@ def compare_with_stored(
 
 
 def print_summary(
-    results: dict[str, list[RolloutEvaluation]], references: RolloutReferences
+    results: dict[str, list[RolloutEvaluation]],
+    references: RolloutReferences,
+    exclude_constant_references: bool,
 ) -> None:
-    """Print the summary of D2 to D5 for every model, pooled over its seeds."""
+    """Print the summary of D2 to D5 for every model, pooled over its seeds.
+
+    `exclude_constant_references` leaves the trajectories with a constant reference
+    out of the summary, as described in `summarize_rollouts`. The result file holds
+    every trajectory either way.
+    """
     num_steps = references.l2_identity.shape[-1]
     horizon = min(SUMMARY_HORIZON, num_steps)
     report_steps = tuple(step for step in SUMMARY_STEPS if step <= horizon)
@@ -478,12 +487,17 @@ def print_summary(
             stack("area_fraction"),
             stack("total_variation"),
             references,
+            exclude_constant_references=exclude_constant_references,
             minima=minima,
             horizon=horizon,
             report_steps=report_steps,
         )
         quartiles = " / ".join(f"{q:.0f}" for q in summary["valid_horizon_quartiles"])
-        print(f"{name} ({summary['num_rollouts']} rollouts)")
+        print(
+            f"{name} ({summary['num_rollouts']} rollouts; "
+            f"{summary['num_constant_references']} trajectories with a constant "
+            f"reference, {'left out' if exclude_constant_references else 'included'})"
+        )
         print(
             f"  valid horizon, 25 / 50 / 75%: {quartiles}"
             f"   never crossed: {summary['fraction_never_crossed']:.1%}"
@@ -543,6 +557,12 @@ def parse_config() -> dict[str, Any]:
     parser.add_argument(
         "--reference-file",
         help="A stored {family}_long_rollout.hdf5 to compare l2 with.",
+    )
+    parser.add_argument(
+        "--exclude-constant-references",
+        action=argparse.BooleanOptionalAction,
+        help="Leave the trajectories with a constant reference out of the printed "
+        "summary of D2 to D5. The result file holds every trajectory either way.",
     )
     parser.add_argument("--output-dir")
     parser.add_argument("--limit", type=int)
@@ -649,7 +669,7 @@ def main() -> None:
         else:
             print(f"{reference_file} does not exist, so l2 is not compared.")
 
-    print_summary(results, references)
+    print_summary(results, references, config["exclude_constant_references"])
 
 
 if __name__ == "__main__":

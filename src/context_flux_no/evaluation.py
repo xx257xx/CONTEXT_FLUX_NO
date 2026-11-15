@@ -290,6 +290,7 @@ def summarize_rollouts(
     total_variation: Float[np.ndarray, " *batch trajectories steps"],
     references: RolloutReferences,
     *,
+    exclude_constant_references: bool,
     minima: Float[np.ndarray, " *batch trajectories steps quantities"] | None = None,
     horizon: int = 80,
     report_steps: tuple[int, ...] = (20, 40, 80),
@@ -299,11 +300,21 @@ def summarize_rollouts(
     The leading `*batch` axes, such as the seeds of one model, are pooled with the
     trajectories. Only the first `horizon` steps are used.
 
+    A trajectory has a constant reference when the total variation of its reference is
+    zero at every step of the horizon. This happens for a scalar law whose initial
+    condition is a constant state, such as a periodic step function with one jump.
+    Both baselines then have zero error and the reference has zero range, so every
+    model error counts as a crossing of the identity baseline at step 1 and as
+    diverged (D2 and D3), the area fraction is 1 wherever the prediction differs (D4),
+    and the total-variation ratio is infinite (D5).
+
     **Arguments:**
 
     - `l2`, `nonfinite`, `area_fraction`, `total_variation`: The fields of
         `RolloutDiagnostics`.
     - `references`: The reference quantities of the same trajectories.
+    - `exclude_constant_references`: Whether the trajectories with a constant
+        reference are left out of every number of the summary.
     - `minima`: The minima of the quantities that must stay positive, or `None`.
     - `horizon`: The number of rollout steps that enter the summary.
     - `report_steps`: The steps at which the failure fractions, the area fraction and
@@ -313,6 +324,9 @@ def summarize_rollouts(
 
     A dictionary with the following entries.
 
+    - `num_rollouts`: The number of rollouts that enter the summary.
+    - `num_constant_references`: The number of trajectories with a constant reference,
+        whether or not they are left out.
     - `valid_horizon_quartiles`: The 25th, 50th and 75th percentile of the valid
         horizon (D2), where a rollout that stays below the identity baseline counts as
         `horizon`.
@@ -335,20 +349,28 @@ def summarize_rollouts(
     if any(step > horizon for step in report_steps):
         raise ValueError(f"report_steps={report_steps} exceed the horizon {horizon}.")
 
-    l2 = l2[..., :horizon]
-    nonfinite = nonfinite[..., :horizon]
-    l2_identity = references.l2_identity[..., :horizon]
-    l2_spatial_mean = references.l2_spatial_mean[..., :horizon]
+    is_constant = np.all(references.total_variation[..., :horizon] == 0.0, axis=-1)
+    keep = ~is_constant if exclude_constant_references else np.ones_like(is_constant)
+
+    l2 = l2[..., keep, :horizon]
+    nonfinite = nonfinite[..., keep, :horizon]
+    area_fraction = area_fraction[..., keep, :, :]
+    l2_identity = references.l2_identity[keep, :horizon]
+    l2_spatial_mean = references.l2_spatial_mean[keep, :horizon]
 
     horizons = valid_horizon(l2, l2_identity, nonfinite)
-    with np.errstate(invalid="ignore"):
+    with np.errstate(invalid="ignore", divide="ignore"):
         diverged = (l2 > l2_spatial_mean) | nonfinite | ~np.isfinite(l2)
         ratio = (
-            total_variation[..., :horizon] / references.total_variation[..., :horizon]
+            total_variation[..., keep, :horizon]
+            / references.total_variation[keep, :horizon]
         )
+    if minima is not None:
+        minima = minima[..., keep, :, :]
 
     summary = {
         "num_rollouts": int(horizons.size),
+        "num_constant_references": int(is_constant.sum()),
         "valid_horizon_quartiles": [
             float(q) for q in np.percentile(np.minimum(horizons, horizon), [25, 50, 75])
         ],

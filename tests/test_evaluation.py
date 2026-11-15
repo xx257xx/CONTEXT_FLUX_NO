@@ -1,7 +1,8 @@
-"""Checks of the segment evaluation in `context_flux_no.evaluation`.
+"""Checks of the segment evaluation and of the rollout summary in
+`context_flux_no.evaluation`.
 
 The drivers are compared with closed forms for a traveling sine wave, and the grouping
-functions with cases that are listed by hand.
+functions and the rollout summary with cases that are listed by hand.
 """
 
 from typing import Any
@@ -13,7 +14,9 @@ from context_flux_no.evaluation import (
     evaluate_segments,
     match_trajectories,
     mean_by_bin,
+    summarize_rollouts,
 )
+from context_flux_no.metrics import RolloutReferences
 from context_flux_no.models.multiphysics.abstract import AbstractMultiphysicsOperator
 from jaxtyping import Array, Float, PRNGKeyArray
 
@@ -161,3 +164,96 @@ def test_mean_by_bin():
     assert counts.tolist() == [2, 1, 0, 1]
     assert np.allclose(means[:, [0, 1, 3]], [[2.0, 10.0, 7.0], [3.0, 20.0, 8.0]])
     assert np.isnan(means[:, 2]).all()
+
+
+def _summary_of_three_rollouts(exclude_constant_references: bool) -> dict[str, Any]:
+    """Summarize three rollouts of four steps, listed by hand.
+
+    - Rollout 0 has a constant reference. Both baselines have zero error on it and its
+        reference has zero range and zero total variation, so a model error of 0.1
+        counts as a crossing and as diverged at step 1.
+    - Rollout 1 reaches the identity-baseline error at step 3.
+    - Rollout 2 stays below the identity-baseline error.
+    """
+    identity = np.array([0.1, 0.2, 0.3, 0.4])
+    references = RolloutReferences(
+        l2_identity=np.stack((np.zeros(4), identity, identity)),
+        l2_spatial_mean=np.stack((np.zeros(4), np.ones(4), np.ones(4))),
+        total_variation=np.stack((np.zeros(4), np.full(4, 2.0), np.full(4, 4.0))),
+    )
+    l2 = np.array(
+        [[0.1, 0.1, 0.1, 0.1], [0.05, 0.1, 0.35, 0.5], [0.01, 0.02, 0.03, 0.04]]
+    )
+    area_fraction = np.stack(
+        (np.ones((4, 1)), np.full((4, 1), 0.25), np.full((4, 1), 0.5))
+    )
+    total_variation = np.stack((np.full(4, 0.2), np.full(4, 1.0), np.full(4, 4.0)))
+    return summarize_rollouts(
+        l2,
+        np.zeros((3, 4), dtype=bool),
+        area_fraction,
+        total_variation,
+        references,
+        exclude_constant_references=exclude_constant_references,
+        horizon=4,
+        report_steps=(4,),
+    )
+
+
+def test_summary_counts_a_constant_reference_as_a_failure_at_step_1():
+    summary = _summary_of_three_rollouts(exclude_constant_references=False)
+
+    assert summary["num_rollouts"] == 3
+    assert summary["num_constant_references"] == 1
+    # Valid horizons 1, 3 and 4.
+    np.testing.assert_allclose(summary["valid_horizon_quartiles"], [2.0, 3.0, 3.5])
+    assert summary["fraction_crossed_at_step_1"] == pytest.approx(1 / 3)
+    assert summary["fraction_never_crossed"] == pytest.approx(1 / 3)
+    assert summary["fraction_diverged"][4] == pytest.approx(1 / 3)
+    # Area fractions 1, 0.25 and 0.5.
+    assert summary["median_area_fraction"][0][4] == pytest.approx(0.5)
+    # The ratio of rollout 0 is infinite and is left out: the median of 0.5 and 1.
+    assert summary["median_total_variation_ratio"][4] == pytest.approx(0.75)
+
+
+def test_summary_without_constant_references():
+    summary = _summary_of_three_rollouts(exclude_constant_references=True)
+
+    assert summary["num_rollouts"] == 2
+    assert summary["num_constant_references"] == 1
+    # Valid horizons 3 and 4.
+    np.testing.assert_allclose(summary["valid_horizon_quartiles"], [3.25, 3.5, 3.75])
+    assert summary["fraction_crossed_at_step_1"] == 0.0
+    assert summary["fraction_never_crossed"] == pytest.approx(0.5)
+    assert summary["fraction_diverged"][4] == 0.0
+    assert summary["median_area_fraction"][0][4] == pytest.approx(0.375)
+    assert summary["median_total_variation_ratio"][4] == pytest.approx(0.75)
+
+
+def test_summary_pools_seeds_after_the_exclusion():
+    """With a leading seed axis, every seed loses the same trajectory."""
+    identity = np.array([0.1, 0.2, 0.3, 0.4])
+    references = RolloutReferences(
+        l2_identity=np.stack((np.zeros(4), identity, identity)),
+        l2_spatial_mean=np.stack((np.zeros(4), np.ones(4), np.ones(4))),
+        total_variation=np.stack((np.zeros(4), np.full(4, 2.0), np.full(4, 4.0))),
+    )
+    l2 = np.array(
+        [[0.1, 0.1, 0.1, 0.1], [0.05, 0.1, 0.35, 0.5], [0.01, 0.02, 0.03, 0.04]]
+    )
+    two_seeds = summarize_rollouts(
+        np.stack((l2, l2)),
+        np.zeros((2, 3, 4), dtype=bool),
+        np.ones((2, 3, 4, 1)),
+        np.ones((2, 3, 4)),
+        references,
+        exclude_constant_references=True,
+        horizon=4,
+        report_steps=(4,),
+    )
+
+    assert two_seeds["num_rollouts"] == 4
+    assert two_seeds["num_constant_references"] == 1
+    # Valid horizons 3, 4, 3 and 4.
+    np.testing.assert_allclose(two_seeds["valid_horizon_quartiles"], [3.0, 3.5, 4.0])
+    assert two_seeds["fraction_never_crossed"] == pytest.approx(0.5)
