@@ -22,12 +22,10 @@ Every set of one seed uses the same initial conditions, and the sine bins share 
 draws of a' and of the sign of b. The error of a model against the bin then varies
 only with the flux.
 
-Example usage, all twelve new sets and then the control set:
+Example usage, the eight sets of the shape axis:
 
     uv run python scripts/data/generate_unseen_flux_1d.py --multirun \
-        flux=sine_rescaled,cubic_shell bin_index=0,1,2 initial_condition_name=grf,step
-    uv run python scripts/data/generate_unseen_flux_1d.py --multirun \
-        flux=sine_box initial_condition_name=grf,step seed=12
+        flux=sine_rescaled bin_index=0,1,2,3 initial_condition_name=grf,step_min2
 """
 
 import logging
@@ -74,18 +72,26 @@ Solution = tuple[
 
 
 def make_initial_condition(name: str) -> InitialConditionFn:
-    """Return the sampler of an initial-condition family of Section B.2.
+    """Return the sampler of an initial-condition family.
 
-    `grf` is the periodic Gaussian random field with covariance
+    `grf` is the periodic Gaussian random field of Section B.2, with covariance
     exp(-(1 - cos(2 pi r))), which is `PeriodicCov(corr_length=1.0)`. The `grf` entry
     of `configs/initial_condition/` has a different kernel and is not used here.
-    `step` is the shock-dominated family with plateau values in [-1, 1].
+
+    `step` is the shock-dominated family of Section B.2: 1 to 5 jumps and plateau
+    values in [-1, 1]. A step function with one jump on a periodic domain has a single
+    plateau, so about a fifth of this family are constant states. A constant state
+    close to zero makes the relative error of a prediction arbitrarily large.
+
+    `step_min2` is the same family with 2 to 5 jumps, which has no constant states.
     """
     match name:
         case "grf":
             return GaussianRandomField1D(PeriodicCov(corr_length=1.0)).sample
         case "step":
             return PeriodicRandomStepFunction1D().sample
+        case "step_min2":
+            return PeriodicRandomStepFunction1D(num_jumps_min=2).sample
         case _:
             raise ValueError(f"Unknown initial condition: {name!r}")
 

@@ -18,15 +18,19 @@ flux: sine_rescaled
 # Index into bins[flux]. Required for sine_rescaled and cubic_shell, null for sine_box.
 bin_index: null
 bins:
-  sine_rescaled: [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]]
+  # The bin (0, 1] is last so that the indices of the first three bins keep their meaning.
+  # It lies inside the training family and anchors the sweep at the speed of the other bins.
+  sine_rescaled: [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0], [0.0, 1.0]]
   cubic_shell: [[1.0, 1.5], [1.5, 2.0], [2.0, 2.5]]
 
 # 1.0 is the agreed sweep. 2.0 is the fallback variant of the rebuttal plan.
 sine_amplitude_max: 1.0
 
-# grf: periodic Gaussian random field of Section B.2. step: shock-dominated family.
+# grf: periodic Gaussian random field of Section B.2.
+# step: shock-dominated family of Section B.2, 1 to 5 jumps. About a fifth are constant states.
+# step_min2: the same family with 2 to 5 jumps, which has no constant states.
 # The key is not `initial_condition`, which Hydra reads as the config group of that name.
-initial_condition_name: step
+initial_condition_name: step_min2
 
 n_coeffs: 100
 n_ics_per_coeff: 100
