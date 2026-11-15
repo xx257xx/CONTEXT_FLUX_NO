@@ -157,10 +157,13 @@ PRESETS: dict[str, dict[str, Any]] = {
         "chunk_size": 10000,
         "batch_size": 1000,
     },
+    # The shock set that generate_shallow_water_step_1d.py writes with the coefficients
+    # and the m(0) of the training set. The shock sets of the submission had beta in
+    # [8, 12], ten times the training range, and are not evaluated here.
     "shallow_water_1d_shock": {
         "loader": "legacy_hdf5",
         "data_path": "datasets/shallow_water_1d/data/test/"
-        "shallow_water_1d_test_step_seed=10.hdf5",
+        "shallow_water_1d_test_step_v2_grf_seed=10.hdf5",
         "checkpoint": _one_run_per_seed("shallow_water_1d"),
         "positivity": "shallow_water",
         "chunk_size": 10000,
