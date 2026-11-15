@@ -14,7 +14,7 @@ the segments by:
 
 A preset holds one test set and the checkpoints of the submission:
 
-    python scripts/evaluation/segment_errors.py --preset shallow_water_1d_shock
+    python scripts/evaluation/segment_errors.py --preset shallow_water_1d_shock_v2
 
 Every value of a preset is also a command-line argument, and an argument overrides the
 preset. `--limit N` restricts a run to the first N trajectories and writes to a
@@ -58,24 +58,28 @@ from rollout_diagnostics import (
 SPARSE_WINDOW_STARTS = tuple(range(2, 60, 6))
 
 # The test sets of the diagnosis. Data paths are relative to --data-root and
-# checkpoints to --checkpoint-root. The first two paths are those that
-# `evaluate_shallow.ipynb` loads (cells 2 and 12).
+# checkpoints to --checkpoint-root. No preset is named `shallow_water_1d_shock`: a
+# result file of that name was written from the submitted set before 2026-11-15, and
+# the name would not say which shock set it holds.
 PRESETS: dict[str, dict[str, Any]] = {
     "shallow_water_1d": {
         "data_path": "datasets/shallow_water_1d/data/test/"
         "shallow_water_1d_test_grf_seed=10.hdf5",
     },
-    "shallow_water_1d_shock": {
-        "data_path": "shallow_water_1d_test_step_grf_seed=10.hdf5",
-    },
-    # The shock set regenerated with the coefficients and the m(0) of the training
-    # set. The two presets around it read sets with beta in [8, 12], ten times the
-    # training range.
+    # The shock set of the paper since the rebuttal, generated with the coefficients
+    # and the m(0) of the training set.
     "shallow_water_1d_shock_v2": {
         "data_path": "datasets/shallow_water_1d/data/test/"
         "shallow_water_1d_test_step_v2_grf_seed=10.hdf5",
     },
-    "shallow_water_1d_shock_low": {
+    # The shock set of the submission, which `evaluate_shallow.ipynb` loaded in cell 12
+    # at `5f67a31`, and the low set derived from it. Both have beta in [8, 12], ten
+    # times the training range. They are kept to reproduce Tables 12 and 13 of the
+    # submission and the diagnosis that found the mismatch.
+    "shallow_water_1d_shock_submitted": {
+        "data_path": "shallow_water_1d_test_step_grf_seed=10.hdf5",
+    },
+    "shallow_water_1d_shock_submitted_low": {
         "data_path": "datasets/shallow_water_1d/data/test/"
         "shallow_water_1d_test_step_low_grf_seed=10.hdf5",
         "window_starts": list(SPARSE_WINDOW_STARTS),
