@@ -10,6 +10,9 @@ The module also computes the errors of every segment of a test set (actions 5a a
 5b). `evaluate_segments` and `evaluate_segment_baselines` run on the accelerator, and
 `match_trajectories` and `mean_by_bin` group their results on the host.
 `scripts/evaluation/segment_errors.py` applies them to the shallow-water test sets.
+
+`max_cubic_wave_speed` and `equal_count_bins` group the segments of a 1D cubic test set
+by their CFL number (action 7c). `scripts/evaluation/context_length.py` applies them.
 """
 
 import dataclasses
@@ -671,3 +674,65 @@ def mean_by_bin(
             / counts
         )
     return means, counts
+
+
+# --- CFL number of a segment (ICLR 2027 rebuttal, action 7c) -------------------------
+
+
+def max_cubic_wave_speed(
+    coefficients: Float[np.ndarray, " *#batch 3"],
+    lower: Float[np.ndarray, " *#batch"],
+    upper: Float[np.ndarray, " *#batch"],
+) -> Float[np.ndarray, " *batch"]:
+    """Return the largest wave speed of a cubic flux over an interval of states.
+
+    The flux is f(u) = a u^3 + b u^2 + c u, as in
+    `context_flux_no.simulations.pde.cubic`, and the wave speed is |f'(u)| with
+    f'(u) = 3 a u^2 + 2 b u + c. The maximum of |f'| over `[lower, upper]` is at an end
+    of the interval or at the vertex u = -b / (3 a) of the parabola, when the vertex
+    lies inside. Multiplied by dt / dx, the result is the CFL number of a segment whose
+    last context frame takes values between `lower` and `upper`.
+
+    **Arguments:**
+
+    - `coefficients`: The coefficients `(a, b, c)` along the last axis.
+    - `lower`: The lower end of the interval. It broadcasts against the leading axes
+        of `coefficients`.
+    - `upper`: The upper end of the interval, not below `lower`.
+    """
+    a, b, c = np.moveaxis(np.asarray(coefficients), -1, 0)
+    lower, upper = np.asarray(lower), np.asarray(upper)
+
+    def speed(u):
+        return np.abs((3 * a * u + 2 * b) * u + c)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vertex = -b / (3 * a)
+    is_inside = np.isfinite(vertex) & (vertex > lower) & (vertex < upper)
+    # Outside the interval the vertex is replaced by an end, which changes nothing.
+    at_vertex = speed(np.where(is_inside, vertex, lower))
+    return np.maximum(np.maximum(speed(lower), speed(upper)), at_vertex)
+
+
+def equal_count_bins(
+    values: Float[np.ndarray, " n"], num_bins: int
+) -> tuple[Int[np.ndarray, " n"], Float[np.ndarray, " {num_bins}+1"]]:
+    """Assign each value to one of `num_bins` bins that hold equally many values.
+
+    The bin edges are the quantiles of the finite values at 0, 1 / num_bins, ..., 1.
+    A bin contains its lower edge, and the last bin also contains its upper edge.
+    Values that are tied at an edge all fall into one bin, so the counts can differ.
+
+    **Returns:**
+
+    The bin index of each value, in the form that `mean_by_bin` takes, and the bin
+    edges. A non-finite value has the index -1.
+    """
+    values = np.asarray(values)
+    is_finite = np.isfinite(values)
+    if not is_finite.any():
+        raise ValueError("No value is finite, so the bins have no edges.")
+    edges = np.quantile(values[is_finite], np.linspace(0.0, 1.0, num_bins + 1))
+    bin_indices = np.searchsorted(edges, values, side="right") - 1
+    bin_indices = np.clip(bin_indices, 0, num_bins - 1)
+    return np.where(is_finite, bin_indices, -1), edges

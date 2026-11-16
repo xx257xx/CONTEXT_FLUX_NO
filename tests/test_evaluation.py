@@ -10,9 +10,11 @@ from typing import Any
 import numpy as np
 import pytest
 from context_flux_no.evaluation import (
+    equal_count_bins,
     evaluate_segment_baselines,
     evaluate_segments,
     match_trajectories,
+    max_cubic_wave_speed,
     mean_by_bin,
     summarize_conservation_drift,
     summarize_rollouts,
@@ -25,6 +27,11 @@ from jaxtyping import Array, Float, PRNGKeyArray
 # Agreement of a closed form with its float32 evaluation, for sums over at most
 # 20 frames of 64 cells of order-one values.
 ATOL = 1e-4
+
+# Agreement of the closed-form maximum of |f'| with its maximum over a grid of 20001
+# states on an interval of length at most 4. The grid misses the maximum of a parabola
+# with |f''| <= 6 by at most 6 * (4 / 20000 / 2)**2 / 2 < 1e-7 in the wave speed.
+WAVE_SPEED_ATOL = 1e-6
 
 NUM_CELLS = 64
 NUM_FRAMES = 12
@@ -281,3 +288,60 @@ def test_conservation_drift_summary_of_three_rollouts():
     np.testing.assert_allclose(
         summarize_conservation_drift(drift, horizon=2)["final"], [0.4 / 3]
     )
+
+
+# Coefficients (a, b, c) and an interval of states. The cases cover a vertex of f'
+# inside the interval, a vertex outside it, a vertex at which |f'| is smaller than at
+# both ends, a quadratic flux, a linear flux and an interval of zero length.
+WAVE_SPEED_CASES = [
+    ((1.0, 0.0, -1.0), (-1.0, 1.0)),
+    ((1.0, 0.0, -1.0), (1.5, 2.0)),
+    ((-0.3, 0.9, 0.2), (-2.0, 2.0)),
+    ((0.5, -1.0, 0.1), (0.0, 1.0)),
+    ((0.0, 0.7, -0.4), (-1.0, 3.0)),
+    ((0.0, 0.0, -0.6), (-1.0, 1.0)),
+    ((0.8, -0.2, 0.3), (0.5, 0.5)),
+]
+
+
+@pytest.mark.parametrize(("coefficients", "interval"), WAVE_SPEED_CASES)
+def test_max_cubic_wave_speed_matches_a_grid_search(coefficients, interval):
+    a, b, c = coefficients
+    states = np.linspace(*interval, 20001)
+    expected = np.abs(3 * a * states**2 + 2 * b * states + c).max()
+    speed = max_cubic_wave_speed(
+        np.asarray(coefficients), np.asarray(interval[0]), np.asarray(interval[1])
+    )
+    assert speed.shape == ()
+    assert abs(float(speed) - expected) <= WAVE_SPEED_ATOL
+
+
+def test_max_cubic_wave_speed_of_a_known_parabola():
+    # f'(u) = 3 u^2 - 1 has the values 2 at u = -1 and u = 1 and -1 at its vertex
+    # u = 0. On [-0.5, 0.5] the ends give 0.25 and the vertex gives the maximum 1.
+    coefficients = np.asarray([1.0, 0.0, -1.0])
+    assert max_cubic_wave_speed(coefficients, np.asarray(-1.0), np.asarray(1.0)) == 2.0
+    assert max_cubic_wave_speed(coefficients, np.asarray(-0.5), np.asarray(0.5)) == 1.0
+
+
+def test_max_cubic_wave_speed_broadcasts_trajectories_against_windows():
+    coefficients = np.asarray([[1.0, 0.0, -1.0], [0.0, 0.0, 0.5]])
+    lower = np.asarray([[-1.0, -0.5, 0.0], [-1.0, -0.5, 0.0]])
+    upper = np.asarray([[1.0, 0.5, 2.0], [1.0, 0.5, 2.0]])
+    speeds = max_cubic_wave_speed(coefficients[:, None, :], lower, upper)
+    assert speeds.shape == (2, 3)
+    assert np.array_equal(speeds, [[2.0, 1.0, 11.0], [0.5, 0.5, 0.5]])
+
+
+def test_equal_count_bins_of_listed_values():
+    values = np.asarray([0.9, 0.1, np.nan, 0.5, 0.3, 0.7, 0.2, np.inf])
+    bin_indices, edges = equal_count_bins(values, 3)
+    # The six finite values in order are 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, two per bin.
+    assert bin_indices.tolist() == [2, 0, -1, 1, 1, 2, 0, -1]
+    assert edges[0] == 0.1 and edges[-1] == 0.9
+    assert len(edges) == 4
+
+
+def test_equal_count_bins_rejects_values_without_a_finite_entry():
+    with pytest.raises(ValueError, match="finite"):
+        equal_count_bins(np.asarray([np.nan, np.inf]), 2)
