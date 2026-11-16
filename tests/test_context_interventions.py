@@ -7,7 +7,6 @@ step. The interventions are compared with each other on inputs for which two of 
 read the same frames.
 """
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -21,6 +20,7 @@ from context_flux_no.evaluation import (
     rollout_with_refresh,
 )
 from context_flux_no.models.multiphysics import HyperFluxFNOLocal
+from helpers import make_small_hfluxno
 from jaxtyping import Array, Float
 
 
@@ -41,30 +41,7 @@ MODEL_ARGS = (0.005, 1 / NUM_CELLS)
 
 @pytest.fixture(scope="module")
 def model() -> HyperFluxFNOLocal:
-    """A small model with the default initialization of the hypernetwork, so that the
-    generated flux networks depend on the context."""
-    return HyperFluxFNOLocal(
-        num_spatial_dims=1,
-        in_channels=1,
-        in_timesteps=None,
-        embedding_dim=16,
-        encoder_type="TRecViT",
-        encoder_kwargs={
-            "grid_size": [NUM_CELLS],
-            "patch_size": [4],
-            "depth": 1,
-            "temporal_block_width": 16,
-            "num_heads": 2,
-            "mlp_hidden_dim": 16,
-        },
-        depth=1,
-        lift_dim=8,
-        stencil_size=(2, 2),
-        width_flux=8,
-        width_hyper=16,
-        blocks_hyper=2,
-        key=jax.random.key(0),
-    )
+    return make_small_hfluxno(NUM_CELLS)
 
 
 @pytest.fixture(scope="module")

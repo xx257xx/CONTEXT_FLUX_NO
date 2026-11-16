@@ -19,6 +19,12 @@ The last part changes what the encoder of an HFluxNO model reads (actions 3a and
 `evaluate_context_interventions` generates them from a shuffled, a static or a donor
 context. `scripts/evaluation/flux_refresh.py` and
 `scripts/evaluation/context_interventions.py` apply them.
+
+`evaluate_effective_flux` evaluates the generated flux network on constant states and
+compares it with the true flux (action 3b), and `evaluate_time_steps` advances one
+step of another size than the training step (action 7c).
+`scripts/evaluation/effective_flux.py` and `scripts/evaluation/time_step.py` apply
+them.
 """
 
 import dataclasses
@@ -31,6 +37,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Bool, Float, Int
+from scipy.optimize import lsq_linear
 
 from .metrics import (
     error_power_spectrum,
@@ -47,6 +54,7 @@ from .metrics import (
 )
 from .models.multiphysics.abstract import AbstractMultiphysicsOperator
 from .models.multiphysics.hyperfluxfno import HyperFluxFNOLocal
+from .nn.operators.fourier_utils import append_grid_channels
 
 
 # A function that returns, for every step of a predicted rollout, the minimum of each
@@ -1074,3 +1082,353 @@ def evaluate_context_interventions(
         (np.zeros((len(donors), len(INTERVENTIONS)), dtype=bool), donors < 0), axis=1
     )[:, None, :]
     return jax.tree.map(lambda x: np.where(is_missing, np.nan, x), errors)
+
+
+# --- Effective flux of the generated flux network (action 3b) ------------------------
+
+# A function that evaluates a flux or its derivative for one set of coefficients.
+FluxFn = Callable[
+    [Float[Array, " params"], Float[Array, " *shape"]], Float[Array, " *shape"]
+]
+
+
+def cubic_flux(
+    coefficients: Float[Array, " 3"], u: Float[Array, " *shape"]
+) -> Float[Array, " *shape"]:
+    """The flux f(u) = a u^3 + b u^2 + c u of
+    `context_flux_no.simulations.pde.cubic`."""
+    a, b, c = coefficients
+    return ((a * u + b) * u + c) * u
+
+
+def cubic_flux_derivative(
+    coefficients: Float[Array, " 3"], u: Float[Array, " *shape"]
+) -> Float[Array, " *shape"]:
+    """The derivative f'(u) = 3 a u^2 + 2 b u + c of `cubic_flux`."""
+    a, b, c = coefficients
+    return (3 * a * u + 2 * b) * u + c
+
+
+def sine_flux(
+    coefficients: Float[Array, " 2"], u: Float[Array, " *shape"]
+) -> Float[Array, " *shape"]:
+    """The flux f(u) = a sin(b u) of `context_flux_no.simulations.pde.sine_1d`."""
+    a, b = coefficients
+    return a * jnp.sin(b * u)
+
+
+def sine_flux_derivative(
+    coefficients: Float[Array, " 2"], u: Float[Array, " *shape"]
+) -> Float[Array, " *shape"]:
+    """The derivative f'(u) = a b cos(b u) of `sine_flux`."""
+    a, b = coefficients
+    return a * b * jnp.cos(b * u)
+
+
+# The flux and its derivative for the coefficient names that a test file stores.
+FLUX_FAMILIES: dict[tuple[str, ...], tuple[FluxFn, FluxFn]] = {
+    ("a", "b", "c"): (cubic_flux, cubic_flux_derivative),
+    ("a", "b"): (sine_flux, sine_flux_derivative),
+}
+
+
+class EffectiveFlux(eqx.Module):
+    """The generated flux network of one context, evaluated on constant states.
+
+    A consistent numerical flux G satisfies G(u, ..., u) = f(u) + c for every constant
+    state u, so its value on a constant field is the flux that it stands for, up to a
+    constant. The flux network of the 1D model also reads the grid coordinate, so the
+    value depends on the interface. The fields hold the mean over the interfaces.
+
+    **Attributes:**
+
+    - `states`: The constant states, equally spaced between the smallest and the
+        largest value of the context.
+    - `flux`: The mean over the interfaces of the flux on each constant state.
+    - `derivative`: The mean over the interfaces of the derivative of that flux with
+        respect to the state. For a consistent flux it equals f'(u).
+    - `derivative_spread`: The standard deviation of that derivative over the
+        interfaces, as a root mean square over the states.
+    - `real_stencil_mismatch`: The relative l2 distance, over the interfaces of the
+        last context frame, between the derivative of the flux along a uniform shift
+        of that frame and f' at the mean of the two cells next to the interface. It is
+        the estimate on real stencils that the constant states are compared with.
+    """
+
+    states: Float[Array, " states"]
+    flux: Float[Array, " states"]
+    derivative: Float[Array, " states"]
+    derivative_spread: Float[Array, ""]
+    real_stencil_mismatch: Float[Array, ""]
+
+
+def effective_flux(
+    model: HyperFluxFNOLocal,
+    context: Float[Array, " time 1 x"],
+    coefficients: Float[Array, " params"],
+    flux_derivative_fn: FluxFn,
+    num_states: int,
+) -> EffectiveFlux:
+    """Evaluate the flux network that a 1D scalar model generates from a context.
+
+    Entry j of the output of the flux network is the flux through the interface
+    between the cells j - 1 and j, and its last entry repeats the first on a periodic
+    grid.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `context`: The context frames.
+    - `coefficients`: The coefficients of the true flux of the trajectory.
+    - `flux_derivative_fn`: The derivative of the true flux, which only
+        `real_stencil_mismatch` uses.
+    - `num_states`: The number of constant states.
+    """
+    if model.num_spatial_dims != 1 or context.shape[1] != 1:
+        raise ValueError(
+            "The effective flux is defined for one spatial dimension and one channel, "
+            f"got a context of shape {context.shape}."
+        )
+    (flux_model,) = model.generate_flux_models(context)
+    num_cells = context.shape[-1]
+
+    def interface_flux(u: Float[Array, " 1 x"]) -> Float[Array, " x"]:
+        return flux_model(append_grid_channels(u))[0, :-1]
+
+    def on_constant_state(state: Float[Array, ""]):
+        return jax.jvp(
+            lambda s: interface_flux(jnp.full((1, num_cells), s)),
+            (state,),
+            (jnp.ones_like(state),),
+        )
+
+    lower, upper = jnp.min(context), jnp.max(context)
+    states = lower + (upper - lower) * jnp.linspace(0.0, 1.0, num_states)
+    flux, derivative = jax.vmap(on_constant_state)(states)
+
+    u_last = context[-1]
+    _, shift_derivative = jax.jvp(interface_flux, (u_last,), (jnp.ones_like(u_last),))
+    u_interface = (jnp.roll(u_last[0], 1) + u_last[0]) / 2
+    target = flux_derivative_fn(coefficients, u_interface)
+    return EffectiveFlux(
+        states=states,
+        flux=flux.mean(axis=1),
+        derivative=derivative.mean(axis=1),
+        derivative_spread=jnp.sqrt(jnp.mean(jnp.var(derivative, axis=1))),
+        real_stencil_mismatch=jnp.linalg.norm(shift_derivative - target)
+        / jnp.linalg.norm(target),
+    )
+
+
+def evaluate_effective_flux(
+    model: HyperFluxFNOLocal,
+    trajectories: Float[np.ndarray, " trajectories frames 1 x"],
+    coefficients: Float[np.ndarray, " trajectories params"],
+    window_starts: tuple[int, ...],
+    *,
+    context_length: int,
+    flux_derivative_fn: FluxFn,
+    num_states: int,
+    chunk_size: int = 1000,
+    batch_size: int = 16,
+) -> EffectiveFlux:
+    """Apply `effective_flux` to the context of every segment of every trajectory.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `trajectories`: The test trajectories. The array stays on the host.
+    - `coefficients`: The coefficients of the true flux of every trajectory.
+    - `window_starts`: The frame indices at which the contexts begin.
+    - `context_length`: The number of context frames.
+    - `flux_derivative_fn`: The derivative of the true flux.
+    - `num_states`: The number of constant states.
+    - `chunk_size`: The number of trajectories that are moved to the device at once.
+    - `batch_size`: The number of trajectories whose contexts run in parallel on the
+        device.
+
+    **Returns:**
+
+    An `EffectiveFlux` whose fields are NumPy arrays with the leading shape
+    `(trajectories, windows)`.
+    """
+    _check_window_starts(window_starts, trajectories.shape[1], context_length)
+    starts = jnp.asarray(window_starts)
+
+    def one_trajectory(model, u, coefficients_):
+        return jax.vmap(
+            lambda context: effective_flux(
+                model, context, coefficients_, flux_derivative_fn, num_states
+            )
+        )(_segments_of(u, starts, context_length))
+
+    @eqx.filter_jit
+    def evaluate_chunk(model, u_chunk, coefficient_chunk):
+        return jax.lax.map(
+            lambda xs: one_trajectory(model, *xs),
+            (u_chunk, coefficient_chunk),
+            batch_size=batch_size,
+        )
+
+    chunks = []
+    for start in range(0, trajectories.shape[0], chunk_size):
+        chunk = slice(start, start + chunk_size)
+        result = evaluate_chunk(
+            model, jnp.asarray(trajectories[chunk]), jnp.asarray(coefficients[chunk])
+        )
+        chunks.append(jax.tree.map(np.asarray, result))
+    return jax.tree.map(lambda *xs: np.concatenate(xs), *chunks)
+
+
+def relative_l2_on_grid(
+    difference: Float[np.ndarray, " *batch states"],
+    reference: Float[np.ndarray, " *batch states"],
+) -> Float[np.ndarray, " *batch"]:
+    """Return ||difference|| / ||reference|| for two functions on an equally spaced
+    grid, with L2 norms by the trapezoidal rule along the last axis.
+
+    The result is not finite where `reference` vanishes on the whole grid.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.sqrt(
+            np.trapezoid(np.square(difference), axis=-1)
+            / np.trapezoid(np.square(reference), axis=-1)
+        )
+
+
+def best_cubic_in_box(
+    states: Float[np.ndarray, " states"],
+    flux_derivative: Float[np.ndarray, " states"],
+    bound: float = 1.0,
+) -> Float[np.ndarray, " 3"]:
+    """Return the cubic flux whose derivative is closest to a given flux derivative,
+    among the cubic fluxes with coefficients in `[-bound, bound]`.
+
+    The result is the least-squares fit of 3 a u^2 + 2 b u + c to `flux_derivative`
+    at `states`, with every coefficient constrained to the box. With `bound = 1` the
+    box is the training family of the 1D cubic models, so the result is the member of
+    the training family that explains an unseen flux best over these states.
+
+    **Returns:**
+
+    The coefficients `(a, b, c)`.
+    """
+    design = np.stack((3 * states**2, 2 * states, np.ones_like(states)), axis=1)
+    return lsq_linear(design, flux_derivative, bounds=(-bound, bound)).x
+
+
+# --- One step of another size (action 7c) --------------------------------------------
+
+
+class TimeStepErrors(eqx.Module):
+    """Errors of single steps of several sizes from one context.
+
+    Every field has one entry per step size.
+
+    **Attributes:**
+
+    - `l2`: The relative l2 error of the model.
+    - `l_inf`: The relative l-infinity error of the model.
+    - `l2_identity`: The relative l2 error of the identity baseline, which predicts
+        the last context frame.
+    - `l_inf_identity`: The relative l-infinity error of the identity baseline.
+    """
+
+    l2: Float[Array, " steps"]
+    l_inf: Float[Array, " steps"]
+    l2_identity: Float[Array, " steps"]
+    l_inf_identity: Float[Array, " steps"]
+
+
+def evaluate_time_steps(
+    model: HyperFluxFNOLocal,
+    trajectories: Float[np.ndarray, " trajectories frames channels *spatial_dims"],
+    window_starts: tuple[int, ...],
+    model_args: tuple[float, ...],
+    *,
+    context_length: int,
+    frames_per_step: int,
+    step_frames: tuple[int, ...],
+    chunk_size: int = 1000,
+    batch_size: int = 16,
+) -> TimeStepErrors:
+    """Compute the errors of single steps of several sizes on every segment.
+
+    The trajectories are stored at a finer spacing than the time step of the model:
+    `frames_per_step` stored frames make one model step. The context is sampled at
+    the time step of the model, and the flux networks are generated from it once.
+    They then advance the last context frame by one step that spans `m` stored frames,
+    for every `m` in `step_frames`, and the result is compared with the stored frame
+    at that time. `m = frames_per_step` is the step that the model was trained on.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `trajectories`: The test trajectories at the stored spacing. The array stays on
+        the host.
+    - `window_starts`: The model steps at which the contexts begin. A start `s` is the
+        stored frame `s * frames_per_step`.
+    - `model_args`: The stored spacing in time, followed by the grid spacing of every
+        spatial dimension.
+    - `context_length`: The number of context frames.
+    - `frames_per_step`: The number of stored frames per time step of the model.
+    - `step_frames`: The step sizes, in stored frames.
+    - `chunk_size`: The number of trajectories that are moved to the device at once.
+    - `batch_size`: The number of trajectories whose segments run in parallel on the
+        device.
+
+    **Returns:**
+
+    A `TimeStepErrors` whose fields are NumPy arrays of shape
+    `(trajectories, windows, len(step_frames))`.
+    """
+    if not window_starts:
+        raise ValueError("window_starts is empty.")
+    last_frames = [
+        (start + context_length - 1) * frames_per_step for start in window_starts
+    ]
+    if (
+        min(window_starts) < 0
+        or max(last_frames) + max(step_frames) >= (trajectories.shape[1])
+    ):
+        raise ValueError(
+            f"A segment that starts at one of the model steps {window_starts} leaves "
+            f"the {trajectories.shape[1]} stored frames."
+        )
+    dt_stored, *dxs = model_args
+    context_frames = (
+        jnp.asarray(window_starts)[:, None] + jnp.arange(context_length)
+    ) * frames_per_step
+    target_frames = jnp.asarray(last_frames)[:, None] + jnp.asarray(step_frames)
+    step_sizes = [m * dt_stored for m in step_frames]
+
+    def one_segment(model, context, targets):
+        flux_models = model.generate_flux_models(context)
+        state = context[-1]
+        predictions = jnp.stack(
+            [model.step(flux_models, state, (dt, *dxs)) for dt in step_sizes]
+        )
+        errors = jax.vmap(lambda u_pred, u: segment_errors(u_pred[None], u[None]))(
+            predictions, targets
+        )
+        identity = jax.vmap(lambda u: segment_errors(state[None], u[None]))(targets)
+        return TimeStepErrors(
+            l2=errors.l2_onestep,
+            l_inf=errors.l_inf_onestep,
+            l2_identity=identity.l2_onestep,
+            l_inf_identity=identity.l_inf_onestep,
+        )
+
+    @eqx.filter_jit
+    def evaluate_chunk(model, u_chunk):
+        return jax.lax.map(
+            lambda u: jax.vmap(lambda *xs: one_segment(model, *xs))(
+                u[context_frames], u[target_frames]
+            ),
+            u_chunk,
+            batch_size=batch_size,
+        )
+
+    return _map_over_chunks(
+        lambda u_chunk: evaluate_chunk(model, u_chunk), trajectories, chunk_size
+    )
