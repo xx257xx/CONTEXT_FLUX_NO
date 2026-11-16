@@ -74,21 +74,28 @@ ALIGNED_WINDOW_ENDS = (39, 45, 51, 57)
 UNSEEN_FLUX_WINDOW_ENDS = tuple(start + 19 for start in range(2, 60, 6))
 # The number of bins of the CFL number in the printed table.
 NUM_CFL_BINS = 10
+# The entries of a stored model configuration in which the checkpoints of one model
+# class may differ: the training context length and the seed of the initialization.
+ALLOWED_CONFIG_DIFFERENCES = frozenset({"in_timesteps", "key.seed"})
 # The names of the cubic coefficients, in the order of `max_cubic_wave_speed`.
 CUBIC_COEFFICIENT_NAMES = ("a", "b", "c")
 
 _HFLUXNO = "cubicflux_1d/HyperFluxFNOLocal/OneStepLoss"
-# The HFluxNO checkpoints by training context length, with seeds 10 and 20 for every
-# length. The lengths 5, 10 and 40 were trained for the NeurIPS rebuttal
-# (`notebooks/misc/ablate_context_length.ipynb`) and have no seed 0. The length 20 is
-# the model of the submission.
+# The HFluxNO checkpoints by training context length, with seeds 0, 10 and 20 for
+# every length. The lengths 5, 10 and 40 were trained for the NeurIPS rebuttal
+# (`notebooks/misc/ablate_context_length.ipynb`). The length 20 is the model of the
+# submission.
 _CONTEXT_LENGTH_CHECKPOINTS = [
+    f"trained_at_5={_HFLUXNO}/seed=0/26-07-24-17_02_51",
     f"trained_at_5={_HFLUXNO}/seed=10/26-07-25-03_23_49",
     f"trained_at_5={_HFLUXNO}/seed=20/26-07-25-14_07_23",
+    f"trained_at_10={_HFLUXNO}/seed=0/26-07-24-23_54_13",
     f"trained_at_10={_HFLUXNO}/seed=10/26-07-25-07_25_05",
     f"trained_at_10={_HFLUXNO}/seed=20/26-07-25-15_45_14",
+    f"trained_at_20={_HFLUXNO}/seed=0/26-04-16-00_31_47",
     f"trained_at_20={_HFLUXNO}/seed=10/26-04-17-07_57_49",
     f"trained_at_20={_HFLUXNO}/seed=20/26-04-17-10_50_08",
+    f"trained_at_40={_HFLUXNO}/seed=0/26-07-25-02_56_19",
     f"trained_at_40={_HFLUXNO}/seed=10/26-07-25-10_56_49",
     f"trained_at_40={_HFLUXNO}/seed=20/26-07-25-16_04_56",
 ]
@@ -186,30 +193,35 @@ def read_model_config(checkpoint: Path) -> dict[str, Any]:
     return flat
 
 
-def print_config_differences(configs: dict[Path, dict[str, Any]]) -> None:
-    """Print how the model configurations of the checkpoints differ from the first
-    checkpoint of the same model class.
+def check_model_configs(configs: dict[Path, dict[str, Any]]) -> None:
+    """Compare the model configuration of every checkpoint with the first checkpoint
+    of the same model class.
 
-    The context-length checkpoints are expected to differ in `in_timesteps` only.
+    A difference in one of `ALLOWED_CONFIG_DIFFERENCES` is printed. Any other
+    difference raises, because the checkpoints would then differ in more than their
+    training context length and their seed.
     """
     first_of_class: dict[Any, Path] = {}
+    unexpected = []
     for path, config in configs.items():
         reference_path = first_of_class.setdefault(config.get("_target_"), path)
-        if reference_path == path:
-            continue
         reference = configs[reference_path]
-        differing = sorted(
-            key
-            for key in reference.keys() | config.keys()
-            if reference.get(key) != config.get(key)
-        )
-        if not differing:
-            print(f"  {path}: same model configuration as {reference_path}")
-        for key in differing:
-            print(
+        for key in sorted(reference.keys() | config.keys()):
+            if reference.get(key) == config.get(key):
+                continue
+            line = (
                 f"  {path}: {key} = {config.get(key, '<absent>')!r}, "
                 f"against {reference.get(key, '<absent>')!r} in {reference_path}"
             )
+            if key in ALLOWED_CONFIG_DIFFERENCES:
+                print(line)
+            else:
+                unexpected.append(line)
+    if unexpected:
+        raise ValueError(
+            "The stored model configurations differ in more than "
+            f"{sorted(ALLOWED_CONFIG_DIFFERENCES)}:\n" + "\n".join(unexpected)
+        )
 
 
 def window_starts_for(
@@ -459,7 +471,7 @@ def main() -> None:
         config["checkpoint"], Path(config["checkpoint_root"])
     )
     print("Differences between the stored model configurations:")
-    print_config_differences(
+    check_model_configs(
         {
             path: read_model_config(path)
             for paths in checkpoints.values()
