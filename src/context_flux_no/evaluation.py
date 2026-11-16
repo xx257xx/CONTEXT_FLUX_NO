@@ -13,9 +13,16 @@ The module also computes the errors of every segment of a test set (actions 5a a
 
 `max_cubic_wave_speed` and `equal_count_bins` group the segments of a 1D cubic test set
 by their CFL number (action 7c). `scripts/evaluation/context_length.py` applies them.
+
+The last part changes what the encoder of an HFluxNO model reads (actions 3a and 3e).
+`rollout_with_refresh` regenerates the flux networks every few steps, and
+`evaluate_context_interventions` generates them from a shuffled, a static or a donor
+context. `scripts/evaluation/flux_refresh.py` and
+`scripts/evaluation/context_interventions.py` apply them.
 """
 
 import dataclasses
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -39,6 +46,7 @@ from .metrics import (
     valid_horizon,
 )
 from .models.multiphysics.abstract import AbstractMultiphysicsOperator
+from .models.multiphysics.hyperfluxfno import HyperFluxFNOLocal
 
 
 # A function that returns, for every step of a predicted rollout, the minimum of each
@@ -736,3 +744,333 @@ def equal_count_bins(
     bin_indices = np.searchsorted(edges, values, side="right") - 1
     bin_indices = np.clip(bin_indices, 0, num_bins - 1)
     return np.where(is_finite, bin_indices, -1), edges
+
+
+def cubic_wave_speed_distance(
+    coefficients: Float[np.ndarray, " *#batch 3"],
+    other_coefficients: Float[np.ndarray, " *#batch 3"],
+    lower: Float[np.ndarray, " *#batch"],
+    upper: Float[np.ndarray, " *#batch"],
+    num_points: int = 129,
+) -> Float[np.ndarray, " *batch"]:
+    """Return the relative L2 distance between the derivatives of two cubic fluxes
+    over an interval of states.
+
+    With f the flux of `coefficients` and g the flux of `other_coefficients`, the
+    result is ||g' - f'|| / ||f'||, where both norms are L2 norms over
+    `[lower, upper]`. The integrals use the trapezoidal rule on `num_points` states.
+    An interval of zero length gives |g'(u) - f'(u)| / |f'(u)| at its one state. The
+    result is not finite where f' vanishes on the whole interval.
+
+    **Arguments:**
+
+    - `coefficients`: The coefficients `(a, b, c)` of the reference flux
+        f(u) = a u^3 + b u^2 + c u, along the last axis.
+    - `other_coefficients`: The coefficients of the flux that is compared with it.
+    - `lower`: The lower end of the interval.
+    - `upper`: The upper end of the interval.
+    - `num_points`: The number of states of the trapezoidal rule.
+    """
+    lower = np.asarray(lower)[..., None]
+    upper = np.asarray(upper)[..., None]
+    states = lower + (upper - lower) * np.linspace(0.0, 1.0, num_points)
+
+    def derivative(coefficients_):
+        a, b, c = np.moveaxis(np.asarray(coefficients_)[..., None, :], -1, 0)
+        return (3 * a * states + 2 * b) * states + c
+
+    reference = derivative(coefficients)
+    difference = derivative(other_coefficients) - reference
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.sqrt(
+            np.trapezoid(difference**2, axis=-1) / np.trapezoid(reference**2, axis=-1)
+        )
+
+
+# --- Flux networks held fixed or generated from another context (actions 3a, 3e) -----
+
+# The contexts that `evaluate_context_interventions` feeds to the encoder before the
+# donor contexts, in the order of the last axis of its result.
+INTERVENTIONS = ("true", "shuffled", "static")
+
+
+class RefreshErrors(eqx.Module):
+    """Errors of one rollout whose flux networks are regenerated every few steps.
+
+    **Attributes:**
+
+    - `l2_rollout`: The relative l2 error of all predicted frames, with one norm over
+        time, channels and space, as in `SegmentErrors`.
+    - `l_inf_rollout`: The relative l-infinity error of all predicted frames.
+    - `l2_final`: The relative l2 error of the last predicted frame.
+    - `l_inf_final`: The relative l-infinity error of the last predicted frame.
+    """
+
+    l2_rollout: Float[Array, ""]
+    l_inf_rollout: Float[Array, ""]
+    l2_final: Float[Array, ""]
+    l_inf_final: Float[Array, ""]
+
+
+def rollout_with_flux_models(
+    model: HyperFluxFNOLocal,
+    flux_models: tuple[eqx.Module, ...],
+    u: Float[Array, " channels *spatial_dims"],
+    args: tuple[float, ...],
+    num_steps: int,
+) -> Float[Array, " {num_steps} channels *spatial_dims"]:
+    """Advance a state by `num_steps` steps with one set of flux networks.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `flux_models`: The flux networks, as `model.generate_flux_models` returns them.
+    - `u`: The state before the first step.
+    - `args`: The `args` of `model.step`, such as `(dt, dx)`.
+    - `num_steps`: The number of steps.
+
+    **Returns:**
+
+    The states after each step.
+    """
+
+    def scan_fn(u_, _):
+        u_next = model.step(flux_models, u_, args)
+        return u_next, u_next
+
+    return jax.lax.scan(scan_fn, u, None, length=num_steps)[1]
+
+
+def rollout_with_refresh(
+    model: HyperFluxFNOLocal,
+    context: Float[Array, " time channels *spatial_dims"],
+    args: tuple[float, ...],
+    num_steps: int,
+    refresh_every: int,
+) -> Float[Array, " {num_steps} channels *spatial_dims"]:
+    """Roll a model out and regenerate its flux networks every `refresh_every` steps.
+
+    The flux networks are generated from the latest `len(context)` frames, of which
+    the newest are predictions, and are held for `refresh_every` steps. With
+    `refresh_every = 1` this is `model.rollout`. With `refresh_every >= num_steps` the
+    flux networks are generated once from `context`.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `context`: The context frames.
+    - `args`: The `args` of `model.step`, such as `(dt, dx)`.
+    - `num_steps`: The number of predicted frames.
+    - `refresh_every`: The number of steps for which one set of flux networks is used.
+    """
+    if refresh_every < 1:
+        raise ValueError(f"refresh_every must be at least 1, got {refresh_every}.")
+    context_length = context.shape[0]
+
+    def block_fn(window, _):
+        flux_models = model.generate_flux_models(window)
+        u_block = rollout_with_flux_models(
+            model, flux_models, window[-1], args, refresh_every
+        )
+        window = jnp.concatenate((window, u_block))[-context_length:]
+        return window, u_block
+
+    # The last block may run past `num_steps`. Its extra steps are computed and
+    # dropped, which keeps every block the same length for `lax.scan`.
+    num_blocks = math.ceil(num_steps / refresh_every)
+    blocks = jax.lax.scan(block_fn, context, None, length=num_blocks)[1]
+    return blocks.reshape(-1, *blocks.shape[2:])[:num_steps]
+
+
+def evaluate_refresh_rollouts(
+    model: HyperFluxFNOLocal,
+    trajectories: Float[np.ndarray, " trajectories frames channels *spatial_dims"],
+    window_starts: tuple[int, ...],
+    model_args: tuple[float, ...],
+    *,
+    context_length: int,
+    rollout_steps: int,
+    refresh_every: tuple[int, ...],
+    chunk_size: int = 1000,
+    batch_size: int = 16,
+) -> RefreshErrors:
+    """Compute the errors of `rollout_with_refresh` on every segment of every
+    trajectory, for several refresh intervals.
+
+    The segments are those of `evaluate_segments`.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `trajectories`: The test trajectories. The array stays on the host.
+    - `window_starts`: The frame indices at which segments begin.
+    - `model_args`: The `args` of `model.step`, such as `(dt, dx)`.
+    - `context_length`: The number of context frames.
+    - `rollout_steps`: The number of predicted frames.
+    - `refresh_every`: The refresh intervals.
+    - `chunk_size`: The number of trajectories that are moved to the device at once.
+    - `batch_size`: The number of trajectories whose segments run in parallel on the
+        device.
+
+    **Returns:**
+
+    A `RefreshErrors` whose fields are NumPy arrays of shape
+    `(trajectories, windows, len(refresh_every))`.
+    """
+    segment_length = context_length + rollout_steps
+    _check_window_starts(window_starts, trajectories.shape[1], segment_length)
+    starts = jnp.asarray(window_starts)
+
+    def one_rollout(model, segment, interval):
+        context, u_data = segment[:context_length], segment[context_length:]
+        u_pred = rollout_with_refresh(
+            model, context, model_args, rollout_steps, interval
+        )
+        errors = segment_errors(u_pred, u_data)
+        final = segment_errors(u_pred[-1:], u_data[-1:])
+        return RefreshErrors(
+            l2_rollout=errors.l2_rollout,
+            l_inf_rollout=errors.l_inf_rollout,
+            l2_final=final.l2_onestep,
+            l_inf_final=final.l_inf_onestep,
+        )
+
+    def one_segment(model, segment):
+        per_interval = [
+            one_rollout(model, segment, interval) for interval in refresh_every
+        ]
+        return jax.tree.map(lambda *xs: jnp.stack(xs), *per_interval)
+
+    @eqx.filter_jit
+    def evaluate_chunk(model, u_chunk):
+        return jax.lax.map(
+            lambda u: jax.vmap(lambda segment: one_segment(model, segment))(
+                _segments_of(u, starts, segment_length)
+            ),
+            u_chunk,
+            batch_size=batch_size,
+        )
+
+    return _map_over_chunks(
+        lambda u_chunk: evaluate_chunk(model, u_chunk), trajectories, chunk_size
+    )
+
+
+def evaluate_context_interventions(
+    model: HyperFluxFNOLocal,
+    trajectories: Float[np.ndarray, " trajectories frames channels *spatial_dims"],
+    donors: Int[np.ndarray, " trajectories num_donors"],
+    permutations: Int[np.ndarray, " trajectories windows context_length"],
+    window_starts: tuple[int, ...],
+    model_args: tuple[float, ...],
+    *,
+    context_length: int,
+    rollout_steps: int,
+    chunk_size: int = 1000,
+    batch_size: int = 16,
+) -> SegmentErrors:
+    """Compute the errors of a model whose flux networks are generated from a context
+    other than the true one.
+
+    On every segment the flux networks are generated once and held for the whole
+    rollout, and the rollout starts from the true last context frame. Only the frames
+    that the encoder reads change:
+
+    - `true`: the context of the segment.
+    - `shuffled`: the context of the segment in the order of `permutations`.
+    - `static`: copies of the last context frame.
+    - one entry per donor: the context of another trajectory at the same frames.
+
+    **Arguments:**
+
+    - `model`: The model, already in inference mode.
+    - `trajectories`: The test trajectories. The array stays on the host.
+    - `donors`: For every trajectory, the indices of its donor trajectories. An index
+        of -1 marks a missing donor, whose errors are NaN.
+    - `permutations`: For every segment, the order in which the encoder reads the
+        context frames.
+    - `window_starts`: The frame indices at which segments begin.
+    - `model_args`: The `args` of `model.step`, such as `(dt, dx)`.
+    - `context_length`: The number of context frames.
+    - `rollout_steps`: The number of predicted frames.
+    - `chunk_size`: The number of trajectories that are moved to the device at once.
+    - `batch_size`: The number of trajectories whose segments run in parallel on the
+        device.
+
+    **Returns:**
+
+    A `SegmentErrors` whose fields are NumPy arrays of shape
+    `(trajectories, windows, len(INTERVENTIONS) + num_donors)`, with the entries of
+    `INTERVENTIONS` first. `l2_rollout` and `l_inf_rollout` are the errors of the
+    rollout with held flux networks.
+    """
+    segment_length = context_length + rollout_steps
+    _check_window_starts(window_starts, trajectories.shape[1], segment_length)
+    starts = jnp.asarray(window_starts)
+    if permutations.shape != (
+        trajectories.shape[0],
+        len(window_starts),
+        context_length,
+    ):
+        raise ValueError(
+            f"permutations has the shape {permutations.shape}, expected "
+            f"{(trajectories.shape[0], len(window_starts), context_length)}."
+        )
+
+    def one_segment(model, segment, donor_segments, permutation):
+        context, u_data = segment[:context_length], segment[context_length:]
+        encoder_inputs = jnp.concatenate(
+            (
+                jnp.stack(
+                    (
+                        context,
+                        context[permutation],
+                        jnp.broadcast_to(context[-1], context.shape),
+                    )
+                ),
+                donor_segments[:, :context_length],
+            )
+        )
+
+        def one_intervention(encoder_input):
+            flux_models = model.generate_flux_models(encoder_input)
+            u_pred = rollout_with_flux_models(
+                model, flux_models, context[-1], model_args, rollout_steps
+            )
+            return segment_errors(u_pred, u_data)
+
+        return jax.vmap(one_intervention)(encoder_inputs)
+
+    def one_trajectory(model, u, u_donors, permutations_):
+        donor_segments = jax.vmap(
+            lambda u_donor: _segments_of(u_donor, starts, segment_length),
+            out_axes=1,
+        )(u_donors)
+        return jax.vmap(lambda *xs: one_segment(model, *xs))(
+            _segments_of(u, starts, segment_length), donor_segments, permutations_
+        )
+
+    @eqx.filter_jit
+    def evaluate_chunk(model, u_chunk, donor_chunk, permutation_chunk):
+        return jax.lax.map(
+            lambda xs: one_trajectory(model, *xs),
+            (u_chunk, donor_chunk, permutation_chunk),
+            batch_size=batch_size,
+        )
+
+    chunks = []
+    for start in range(0, trajectories.shape[0], chunk_size):
+        chunk = slice(start, start + chunk_size)
+        errors = evaluate_chunk(
+            model,
+            jnp.asarray(trajectories[chunk]),
+            jnp.asarray(trajectories[np.clip(donors[chunk], 0, None)]),
+            jnp.asarray(permutations[chunk]),
+        )
+        chunks.append(jax.tree.map(np.asarray, errors))
+    errors = jax.tree.map(lambda *xs: np.concatenate(xs), *chunks)
+
+    is_missing = np.concatenate(
+        (np.zeros((len(donors), len(INTERVENTIONS)), dtype=bool), donors < 0), axis=1
+    )[:, None, :]
+    return jax.tree.map(lambda x: np.where(is_missing, np.nan, x), errors)

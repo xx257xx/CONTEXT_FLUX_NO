@@ -651,6 +651,55 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
 
         return u0, None
 
+    # TODO: `__call__` repeats the bodies of `generate_flux_models` and `step`, because
+    # the function of the submission is not changed during the rebuttal. It should
+    # call them, so that the class has one route to a step.
+    def generate_flux_models(
+        self,
+        context: Float[Array, "time channels *grids"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ) -> tuple[FluxModel, ...]:
+        """Generate the flux network of every spatial dimension from a context.
+
+        `generate_flux_models` and `step` together compute what `__call__` computes:
+        `step(generate_flux_models(u), u[-1], args)` equals `__call__(u, args)[0]`. They
+        exist so that the context and the advanced state can be chosen separately, and
+        so that one set of flux networks can advance several steps (ICLR 2027 rebuttal
+        plan, actions 3a, 3b, 3e and 7c).
+
+        **Arguments:**
+
+        - `context`: The frames that the encoder reads.
+        """
+        v: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
+            append_grid_channels
+        )(context)
+        context_embed: Float[Array, " embedding_dim"] = self.context_encoder(v, key=key)
+        context_embed = self.hypernetwork_trunk(context_embed)
+        return tuple(head(context_embed) for head in self.hypernetwork_heads)
+
+    def step(
+        self,
+        flux_models: tuple[FluxModel, ...],
+        u: Float[Array, " channels *grids"],
+        args: tuple[float, ...],
+    ) -> Float[Array, " channels *grids"]:
+        """Advance one state by one finite-volume step with given flux networks.
+
+        **Arguments:**
+
+        - `flux_models`: The flux network of every spatial dimension, as
+            `generate_flux_models` returns them.
+        - `u`: The state to advance.
+        - `args`: The time step followed by the grid spacing of every spatial dimension.
+        """
+        dt, *dxs = args
+        v: Float[Array, " channels+num_spatial_dims *grids"] = append_grid_channels(u)
+        for i, (flux_model, dx) in enumerate(zip(flux_models, dxs)):
+            u = u - dt * self._apply_flux(flux_model, v, i) / dx
+        return u
+
     def _apply_flux(
         self, flux, v: Float[Array, " in_channels *grids"], spatial_axis: int
     ) -> Float[Array, " out_channels *grids"]:
