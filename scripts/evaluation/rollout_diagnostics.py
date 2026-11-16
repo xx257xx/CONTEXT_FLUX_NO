@@ -43,6 +43,7 @@ from context_flux_no.evaluation import (
     evaluate_rollouts,
     RolloutEvaluation,
     shallow_water_minima,
+    summarize_conservation_drift,
     summarize_rollouts,
 )
 from context_flux_no.metrics import RolloutReferences
@@ -523,6 +524,44 @@ def print_summary(
             if row is not None:
                 cells = "".join(f"{row[step]:>10.3g}" for step in report_steps)
                 print(f"  {label:34s}{cells}")
+
+    print_conservation_drift(results, references, horizon)
+
+
+def print_conservation_drift(
+    results: dict[str, list[RolloutEvaluation]],
+    references: RolloutReferences,
+    horizon: int,
+) -> None:
+    """Print the conservation drift of the reference and of every model.
+
+    Each model shows the mean and the standard deviation over its seeds of the three
+    numbers of `summarize_conservation_drift`. The reference has no seeds.
+    """
+    kinds = ("mean", "final", "worst")
+    reference = summarize_conservation_drift(
+        references.conservation_drift, horizon=horizon
+    )
+    num_channels = references.conservation_drift.shape[-1]
+    print(f"Conservation drift over {horizon} steps, mean ± std over seeds")
+    for channel in range(num_channels):
+        print(f"  channel {channel}" + "".join(f"{kind:>24s}" for kind in kinds))
+        cells = "".join(f"{reference[kind][channel]:>24.3e}" for kind in kinds)
+        print(f"  {'reference':20s}{cells}")
+        for name, evaluations in results.items():
+            per_seed = [
+                summarize_conservation_drift(
+                    e.diagnostics.conservation_drift, horizon=horizon
+                )
+                for e in evaluations
+            ]
+            cells = ""
+            for kind in kinds:
+                values = np.array([summary[kind][channel] for summary in per_seed])
+                cells += f"{values.mean():>13.3e} ± {values.std():.1e}"
+            finite = min(summary["fraction_finite"][channel] for summary in per_seed)
+            note = "" if finite == 1.0 else f"   finite: {finite:.1%} of trajectories"
+            print(f"  {name:20s}{cells}{note}")
 
 
 def parse_config() -> dict[str, Any]:

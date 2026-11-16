@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from context_flux_no.metrics import (
+    conservation_drift,
     count_jumps,
     error_area_fraction,
     error_power_spectrum,
@@ -110,7 +111,7 @@ def test_rollout_references_of_a_translating_wave():
 def test_rollout_diagnostics_flags_nonfinite_steps():
     u_data = jnp.ones((3, 2, 16)) + jnp.sin(2 * jnp.pi * _grid(16))
     u_pred = u_data.at[1, 1, 3].set(jnp.nan)
-    diagnostics = rollout_diagnostics(u_pred, u_data, jnp.array([0.1]))
+    diagnostics = rollout_diagnostics(u_data[0], u_pred, u_data, jnp.array([0.1]))
     assert diagnostics.nonfinite.tolist() == [False, True, False]
     assert jnp.allclose(diagnostics.l2[0], 0.0, atol=ATOL)
     assert diagnostics.area_fraction.shape == (3, 1)
@@ -157,3 +158,31 @@ def test_jumps_of_a_step_function():
     assert int(count_jumps(u)) == 3
     assert jnp.allclose(largest_jump(u), 3.5, atol=ATOL)
     assert int(count_jumps(jnp.full(8, 1.5))) == 0
+
+
+def test_conservation_drift_of_a_shift_and_of_an_offset():
+    # Channel 0 is a sine with mean zero. The sum of |sin(2 pi k / 64)| over 64 cells
+    # is 2 / tan(pi / 64), by the closed form of a sum of sines in arithmetic
+    # progression. Channel 1 is the constant 2, with an L1 norm of 64 * 2.
+    x = _grid(64)
+    u_initial = jnp.stack((jnp.sin(2 * jnp.pi * x), jnp.full(64, 2.0)))
+    # A periodic shift keeps both integrals.
+    shifted = jnp.roll(u_initial, 5, axis=1)
+    assert jnp.allclose(conservation_drift(shifted, u_initial), 0.0, atol=ATOL)
+    # An offset of 0.1 changes each integral by 64 * 0.1.
+    drift = conservation_drift(u_initial + 0.1, u_initial)
+    expected = jnp.array([6.4 * jnp.tan(jnp.pi / 64) / 2, 0.05])
+    assert jnp.allclose(drift, expected, rtol=RTOL)
+
+
+def test_rollout_fields_measure_the_drift_from_the_last_context_state():
+    # The prediction gains 0.01 per cell and step on a state of constant 1, so its
+    # drift at step n is 0.01 * n. The reference is a shifted copy and has none.
+    u_context_last = jnp.ones((1, 32))
+    u_data = jnp.ones((4, 1, 32))
+    u_pred = u_data + 0.01 * jnp.arange(1, 5)[:, None, None]
+    diagnostics = rollout_diagnostics(u_context_last, u_pred, u_data, jnp.array([0.1]))
+    references = rollout_references(u_context_last, u_data)
+    expected = 0.01 * jnp.arange(1, 5)[:, None]
+    assert jnp.allclose(diagnostics.conservation_drift, expected, rtol=RTOL)
+    assert jnp.allclose(references.conservation_drift, 0.0, atol=ATOL)

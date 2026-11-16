@@ -160,6 +160,34 @@ def ideal_gas_pressure(
     return (gamma - 1.0) * (energy - kinetic_energy)
 
 
+def conservation_drift(
+    u: Float[Array, " channels *spatial_dims"],
+    u_initial: Float[Array, " channels *spatial_dims"],
+) -> Float[Array, " channels"]:
+    """Compute the normalized drift of the conserved quantity of every channel.
+
+    The drift of a channel is `|I(u) - I(u_initial)| / L1(u_initial)`, where `I` is
+    the integral of the channel over the domain and `L1` the integral of its absolute
+    value. On a uniform grid the cell volume cancels, so both are sums over the cells.
+    The L1 norm replaces the integral itself in the denominator because the integral
+    is zero for the mean-subtracted initial conditions of the 2D cubic family.
+
+    A conservation law with periodic boundaries keeps `I` constant, so the drift of
+    the exact solution is zero.
+
+    **Arguments:**
+
+    - `u`: The state whose drift is measured.
+    - `u_initial`: The state that the drift is measured from. For a rollout it is the
+        last state of the context window.
+    """
+    spatial_axes = tuple(range(1, u.ndim))
+    integral_change = jnp.sum(u, axis=spatial_axes) - jnp.sum(
+        u_initial, axis=spatial_axes
+    )
+    return jnp.abs(integral_change) / jnp.sum(jnp.abs(u_initial), axis=spatial_axes)
+
+
 class RolloutReferences(eqx.Module):
     """Quantities of one rollout that depend on the reference solution only.
 
@@ -170,11 +198,14 @@ class RolloutReferences(eqx.Module):
     - `l2_spatial_mean`: The relative l2 error of the prediction that holds the cell
         mean of each channel of the last context state (D1).
     - `total_variation`: The total variation of the first channel of the reference.
+    - `conservation_drift`: The conservation drift of the reference from the last
+        context state, per channel. It is the level that the data itself reaches.
     """
 
     l2_identity: Float[Array, " steps"]
     l2_spatial_mean: Float[Array, " steps"]
     total_variation: Float[Array, " steps"]
+    conservation_drift: Float[Array, " steps channels"]
 
 
 def rollout_references(
@@ -194,6 +225,9 @@ def rollout_references(
         l2_identity=jax.vmap(relative_L2_error)(identity, u_data),
         l2_spatial_mean=jax.vmap(relative_L2_error)(spatial_mean, u_data),
         total_variation=jax.vmap(total_variation)(u_data[:, 0]),
+        conservation_drift=jax.vmap(conservation_drift, in_axes=(0, None))(
+            u_data, u_context_last
+        ),
     )
 
 
@@ -211,6 +245,8 @@ class RolloutDiagnostics(eqx.Module):
     - `area_fraction`: The error area fraction (D4) at every threshold.
     - `total_variation`: The total variation of the prediction (D5).
     - `nonfinite`: Whether any cell of the prediction is NaN or infinite (D3).
+    - `conservation_drift`: The conservation drift of the prediction from the last
+        context state, per channel.
     """
 
     l2: Float[Array, " steps"]
@@ -219,9 +255,11 @@ class RolloutDiagnostics(eqx.Module):
     area_fraction: Float[Array, " steps thresholds"]
     total_variation: Float[Array, " steps"]
     nonfinite: Bool[Array, " steps"]
+    conservation_drift: Float[Array, " steps channels"]
 
 
 def rollout_diagnostics(
+    u_context_last: Float[Array, " channels *spatial_dims"],
     u_pred: Float[Array, " steps channels *spatial_dims"],
     u_data: Float[Array, " steps channels *spatial_dims"],
     area_thresholds: Float[Array, " thresholds"],
@@ -230,6 +268,7 @@ def rollout_diagnostics(
 
     **Arguments:**
 
+    - `u_context_last`: The last state of the context window.
     - `u_pred`: The predicted states.
     - `u_data`: The reference states at the same steps.
     - `area_thresholds`: The thresholds of the error area fraction, as fractions of the
@@ -244,6 +283,9 @@ def rollout_diagnostics(
         ),
         total_variation=jax.vmap(total_variation)(u_pred[:, 0]),
         nonfinite=jnp.any(~jnp.isfinite(u_pred), axis=tuple(range(1, u_pred.ndim))),
+        conservation_drift=jax.vmap(conservation_drift, in_axes=(0, None))(
+            u_pred, u_context_last
+        ),
     )
 
 

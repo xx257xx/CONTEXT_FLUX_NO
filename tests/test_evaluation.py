@@ -14,6 +14,7 @@ from context_flux_no.evaluation import (
     evaluate_segments,
     match_trajectories,
     mean_by_bin,
+    summarize_conservation_drift,
     summarize_rollouts,
 )
 from context_flux_no.metrics import RolloutReferences
@@ -180,6 +181,7 @@ def _summary_of_three_rollouts(exclude_constant_references: bool) -> dict[str, A
         l2_identity=np.stack((np.zeros(4), identity, identity)),
         l2_spatial_mean=np.stack((np.zeros(4), np.ones(4), np.ones(4))),
         total_variation=np.stack((np.zeros(4), np.full(4, 2.0), np.full(4, 4.0))),
+        conservation_drift=np.zeros((3, 4, 1)),
     )
     l2 = np.array(
         [[0.1, 0.1, 0.1, 0.1], [0.05, 0.1, 0.35, 0.5], [0.01, 0.02, 0.03, 0.04]]
@@ -237,6 +239,7 @@ def test_summary_pools_seeds_after_the_exclusion():
         l2_identity=np.stack((np.zeros(4), identity, identity)),
         l2_spatial_mean=np.stack((np.zeros(4), np.ones(4), np.ones(4))),
         total_variation=np.stack((np.zeros(4), np.full(4, 2.0), np.full(4, 4.0))),
+        conservation_drift=np.zeros((3, 4, 1)),
     )
     l2 = np.array(
         [[0.1, 0.1, 0.1, 0.1], [0.05, 0.1, 0.35, 0.5], [0.01, 0.02, 0.03, 0.04]]
@@ -257,3 +260,24 @@ def test_summary_pools_seeds_after_the_exclusion():
     # Valid horizons 3, 4, 3 and 4.
     np.testing.assert_allclose(two_seeds["valid_horizon_quartiles"], [3.0, 3.5, 4.0])
     assert two_seeds["fraction_never_crossed"] == pytest.approx(0.5)
+
+
+def test_conservation_drift_summary_of_three_rollouts():
+    """Summarize the drift of three rollouts of three steps, listed by hand.
+
+    Rollout 2 turns non-finite at its last step and is left out of every mean.
+    """
+    drift = np.array(
+        [[0.0, 0.2, 0.1], [0.3, 0.1, 0.2], [0.1, 0.1, np.inf]],
+    )[..., None]
+    summary = summarize_conservation_drift(drift, horizon=3)
+
+    # Time means 0.1 and 0.2, last steps 0.1 and 0.2, largest values 0.2 and 0.3.
+    np.testing.assert_allclose(summary["mean"], [0.15])
+    np.testing.assert_allclose(summary["final"], [0.15])
+    np.testing.assert_allclose(summary["worst"], [0.25])
+    np.testing.assert_allclose(summary["fraction_finite"], [2 / 3])
+    # A shorter horizon ends before the non-finite step, so all three enter.
+    np.testing.assert_allclose(
+        summarize_conservation_drift(drift, horizon=2)["final"], [0.4 / 3]
+    )

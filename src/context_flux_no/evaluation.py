@@ -118,7 +118,7 @@ def _rollout_one(
     context, u_data = u[:context_length], u[context_length:]
     u_pred = model.rollout(context, model_args, num_steps=len(u_data))[0]
 
-    diagnostics = rollout_diagnostics(u_pred, u_data, area_thresholds)
+    diagnostics = rollout_diagnostics(context[-1], u_pred, u_data, area_thresholds)
     minima = None if minima_fn is None else minima_fn(u_pred, coefficient)
     spectrum = None
     if spectrum_indices:
@@ -394,6 +394,56 @@ def summarize_rollouts(
             nonpositive = np.any(minima[..., :horizon, :] <= 0.0, axis=-1)
         summary["fraction_nonpositive"] = _fraction_by_step(nonpositive, report_steps)
     return summary
+
+
+def summarize_conservation_drift(
+    conservation_drift: Float[np.ndarray, " trajectories steps channels"],
+    *,
+    horizon: int = 80,
+) -> dict[str, Any]:
+    """Reduce the conservation drift of one checkpoint to three numbers per channel.
+
+    The three numbers are those of the conservation result of the submission. Each is
+    a mean over the trajectories whose drift is finite at every step of the horizon.
+    The caller applies the function to every seed of a model and reports the mean and
+    the standard deviation over the seeds, as for the other tables of the paper.
+
+    **Arguments:**
+
+    - `conservation_drift`: The field of `RolloutDiagnostics` or `RolloutReferences`
+        of that name.
+    - `horizon`: The number of rollout steps that enter the summary.
+
+    **Returns:**
+
+    A dictionary with the following entries.
+
+    - `mean`: The mean of the drift over the steps and the trajectories.
+    - `final`: The mean over the trajectories of the drift at the last step.
+    - `worst`: The mean over the trajectories of the largest drift of a trajectory.
+    - `fraction_finite`: The fraction of trajectories that enter these means, per
+        channel.
+    """
+    num_steps = conservation_drift.shape[1]
+    if num_steps < horizon:
+        raise ValueError(f"The rollouts have {num_steps} steps, fewer than {horizon}.")
+    drift = conservation_drift[:, :horizon]
+    is_finite = np.all(np.isfinite(drift), axis=1)
+    count = is_finite.sum(axis=0)
+
+    def mean_over_finite(
+        per_trajectory: Float[np.ndarray, " trajectories channels"],
+    ) -> Float[np.ndarray, " channels"]:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(is_finite, per_trajectory, 0.0).sum(axis=0) / count
+
+    with np.errstate(invalid="ignore"):
+        return {
+            "mean": mean_over_finite(drift.mean(axis=1)),
+            "final": mean_over_finite(drift[:, -1]),
+            "worst": mean_over_finite(drift.max(axis=1)),
+            "fraction_finite": count / drift.shape[0],
+        }
 
 
 # --- Segment errors (ICLR 2027 rebuttal, actions 5a and 5b) -------------------------
