@@ -44,8 +44,8 @@ def describe_hdf5(path: Path) -> str:
         other_dims = [dim for dim in coeffs.dims if dim != "param"]
         low, high = coeffs.min(other_dims), coeffs.max(other_dims)
         ranges = " ".join(
-            f"{name}=[{float(low.sel(param=name)):+.2f},"
-            f"{float(high.sel(param=name)):+.2f}]"
+            f"{name}=[{float(low.sel(param=name)):+.3g},"
+            f"{float(high.sel(param=name)):+.3g}]"
             for name in coeffs["param"].values
         )
         u0 = dataset["values"].isel(t=0)
@@ -85,8 +85,9 @@ def main() -> None:
 
     if arguments.euler_root is not None:
         print("=== euler_2d")
-        for path in sorted(Path(arguments.euler_root).rglob("*.zarr")):
-            print(f"  {path.name:70s} {describe_zarr(path)}")
+        euler_root = Path(arguments.euler_root)
+        for path in sorted(euler_root.rglob("*.zarr")):
+            print(f"  {str(path.relative_to(euler_root)):70s} {describe_zarr(path)}")
 
 
 if __name__ == "__main__":
