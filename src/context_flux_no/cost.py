@@ -208,11 +208,11 @@ def step_flop_breakdown(
         )
     if isinstance(model, HyperFluxFNOLocal):
         flops["generation"] = count_flops(
-            lambda m, u: m.generate_flux_models(u),
+            lambda m, u: m.generate_solver(u),
             model,
             context,
         )
-        flux_models = model.generate_flux_models(context)
+        flux_models = model.generate_solver(context)
         flops["flux_application"] = count_flops(
             lambda m, f, u: m.step(f, u, args), model, flux_models, context[-1]
         )

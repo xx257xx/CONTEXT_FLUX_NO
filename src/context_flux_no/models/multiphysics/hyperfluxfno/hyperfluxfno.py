@@ -13,7 +13,7 @@ from context_flux_no.nn.channelwise import ChannelwiseMLP
 from context_flux_no.nn.hypernetwork import HypernetworkHead
 from context_flux_no.nn.operators.fourier_utils import append_grid_channels
 
-from ..abstract import AbstractMultiphysicsOperator
+from ..abstract import AbstractGeneratedSolverOperator, AbstractMultiphysicsOperator
 from .encoders import AbstractEncoder
 from .target_networks import AbstractTargetNetwork
 from .utils import make_encoder, make_target_network
@@ -530,7 +530,7 @@ class FluxModel(eqx.Module):
         return f
 
 
-class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
+class HyperFluxFNOLocal(AbstractGeneratedSolverOperator[tuple[FluxModel, ...]]):
     context_encoder: AbstractEncoder
     hypernetwork_trunk: eqx.nn.MLP
     hypernetwork_heads: tuple[HypernetworkHead[FluxModel], ...]
@@ -651,10 +651,10 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
 
         return u0, None
 
-    # TODO: `__call__` repeats the bodies of `generate_flux_models` and `step`, because
-    # the function of the submission is not changed during the rebuttal. It should
-    # call them, so that the class has one route to a step.
-    def generate_flux_models(
+    # TODO: `__call__` repeats the bodies of `generate_solver` and `step`, because the
+    # function of the submission is not changed during the rebuttal. It should call
+    # them, so that the class has one route to a step.
+    def generate_solver(
         self,
         context: Float[Array, "time channels *grids"],
         *,
@@ -662,11 +662,8 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
     ) -> tuple[FluxModel, ...]:
         """Generate the flux network of every spatial dimension from a context.
 
-        `generate_flux_models` and `step` together compute what `__call__` computes:
-        `step(generate_flux_models(u), u[-1], args)` equals `__call__(u, args)[0]`. They
-        exist so that the context and the advanced state can be chosen separately, and
-        so that one set of flux networks can advance several steps (ICLR 2027 rebuttal
-        plan, actions 3a, 3b, 3e and 7c).
+        The solver of HFluxNO is the tuple of generated flux networks, one per spatial
+        dimension. Action 3b of the ICLR 2027 rebuttal plan evaluates them directly.
 
         **Arguments:**
 
@@ -681,7 +678,7 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
 
     def step(
         self,
-        flux_models: tuple[FluxModel, ...],
+        solver: tuple[FluxModel, ...],
         u: Float[Array, " channels *grids"],
         args: tuple[float, ...],
     ) -> Float[Array, " channels *grids"]:
@@ -689,14 +686,14 @@ class HyperFluxFNOLocal(AbstractMultiphysicsOperator):
 
         **Arguments:**
 
-        - `flux_models`: The flux network of every spatial dimension, as
-            `generate_flux_models` returns them.
+        - `solver`: The flux network of every spatial dimension, as `generate_solver`
+            returns them.
         - `u`: The state to advance.
         - `args`: The time step followed by the grid spacing of every spatial dimension.
         """
         dt, *dxs = args
         v: Float[Array, " channels+num_spatial_dims *grids"] = append_grid_channels(u)
-        for i, (flux_model, dx) in enumerate(zip(flux_models, dxs)):
+        for i, (flux_model, dx) in enumerate(zip(solver, dxs)):
             u = u - dt * self._apply_flux(flux_model, v, i) / dx
         return u
 
@@ -790,7 +787,9 @@ class ContextConditionedFluxModel(eqx.Module):
         return f
 
 
-class ContextAppendedFluxNO(AbstractMultiphysicsOperator):
+class ContextAppendedFluxNO(
+    AbstractGeneratedSolverOperator[Float[Array, " embedding_dim"]]
+):
     context_encoder: AbstractEncoder
     hypernetwork_trunk: eqx.nn.MLP
     fluxes: tuple[ContextConditionedFluxModel, ...]
@@ -902,6 +901,51 @@ class ContextAppendedFluxNO(AbstractMultiphysicsOperator):
             u0 = u0 - dt * df / dx
 
         return u0, None
+
+    # TODO: `__call__` repeats the bodies of `generate_solver` and `step`, because the
+    # function of the submission is not changed during the rebuttal. It should call
+    # them, so that the class has one route to a step.
+    def generate_solver(
+        self,
+        context: Float[Array, "time channels *grids"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ) -> Float[Array, " embedding_dim"]:
+        """Encode a context into the vector that the flux networks are conditioned on.
+
+        The solver of this model is the context vector after the hypernetwork trunk.
+        Held fixed, it makes the flux networks a fixed solver, as the generated flux
+        networks of `HyperFluxFNOLocal` are (ICLR 2027 rebuttal plan, action 4f).
+
+        **Arguments:**
+
+        - `context`: The frames that the encoder reads.
+        """
+        v: Float[Array, "time channels+num_spatial_dims *grids"] = jax.vmap(
+            append_grid_channels
+        )(context)
+        context_embed: Float[Array, " embedding_dim"] = self.context_encoder(v, key=key)
+        return self.hypernetwork_trunk(context_embed)
+
+    def step(
+        self,
+        solver: Float[Array, " embedding_dim"],
+        u: Float[Array, " channels *grids"],
+        args: tuple[float, ...],
+    ) -> Float[Array, " channels *grids"]:
+        """Advance one state by one finite-volume step with a given context vector.
+
+        **Arguments:**
+
+        - `solver`: The context vector, as `generate_solver` returns it.
+        - `u`: The state to advance.
+        - `args`: The time step followed by the grid spacing of every spatial dimension.
+        """
+        dt, *dxs = args
+        v: Float[Array, " channels+num_spatial_dims *grids"] = append_grid_channels(u)
+        for i, (flux_model, dx) in enumerate(zip(self.fluxes, dxs)):
+            u = u - dt * self._apply_flux(flux_model, v, solver, i) / dx
+        return u
 
     def _apply_flux(
         self, flux, v: Float[Array, " in_channels *grids"], context, spatial_axis: int

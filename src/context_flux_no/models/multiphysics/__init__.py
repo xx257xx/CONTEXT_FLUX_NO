@@ -4,7 +4,10 @@ from context_flux_no.models.multiphysics.hyperfluxfno.hyperfluxfno import (
     HyperNeuralOperatorv2 as HyperNeuralOperatorv2,
 )
 
-from .abstract import AbstractMultiphysicsOperator as AbstractMultiphysicsOperator
+from .abstract import (
+    AbstractGeneratedSolverOperator as AbstractGeneratedSolverOperator,
+    AbstractMultiphysicsOperator as AbstractMultiphysicsOperator,
+)
 from .disco import DISCO as DISCO
 from .dpot import DPOT as DPOT
 from .fluxno import NaiveFluxNO as NaiveFluxNO

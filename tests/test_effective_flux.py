@@ -69,7 +69,7 @@ class CentralFluxOperator(eqx.Module):
     coefficients: Float[Array, " 3"]
     num_spatial_dims: int = 1
 
-    def generate_flux_models(self, context: Any) -> tuple[CentralFluxModel]:
+    def generate_solver(self, context: Any) -> tuple[CentralFluxModel]:
         return (CentralFluxModel(self.coefficients),)
 
 
@@ -294,7 +294,7 @@ def test_the_identity_baseline_of_a_step_spans_its_stored_frames(model):
 
 def test_a_step_is_linear_in_the_time_step(model):
     context = _context()
-    flux_models = model.generate_flux_models(context)
+    flux_models = model.generate_solver(context)
     dx = 1 / NUM_CELLS
     one = model.step(flux_models, context[-1], (0.005, dx)) - context[-1]
     two = model.step(flux_models, context[-1], (0.01, dx)) - context[-1]
