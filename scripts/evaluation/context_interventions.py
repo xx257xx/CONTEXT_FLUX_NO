@@ -29,6 +29,13 @@ derivatives of donor and receiver, ||f'_donor - f'_receiver|| / ||f'_receiver||,
 L2 norms over the interval of states of the receiver's last context frame. It prints
 the error in bins of this distance.
 
+For every donor the script also stores the state coverage: the fraction of the cells
+of the receiver's last context frame whose value lies between the smallest and the
+largest value of the donor context. The flux generated from the donor is used on
+those cells, and a coverage below 1 means that some of them hold states the donor
+context never showed. The script prints the error of both kinds of donor in bins of
+the coverage.
+
 The loader and the checkpoint resolution are those of `rollout_diagnostics.py`, and
 the coefficients are read as in `context_length.py`. Both are in this directory,
 which Python finds because it puts the directory of a script on the path.
@@ -45,6 +52,7 @@ import h5py
 import jax
 import numpy as np
 from context_flux_no.evaluation import (
+    coverage_bins,
     cubic_wave_speed_distance,
     equal_count_bins,
     evaluate_context_interventions,
@@ -52,6 +60,7 @@ from context_flux_no.evaluation import (
     INTERVENTIONS,
     mean_by_bin,
     SegmentBaselines,
+    state_coverage,
 )
 from context_flux_no.metrics import SegmentErrors
 from context_flux_no.training.io import load_model
@@ -125,6 +134,24 @@ def choose_donors(
     return donors
 
 
+def context_intervals(
+    trajectories: Float[np.ndarray, " trajectories frames channels x"],
+    window_starts: tuple[int, ...],
+    context_length: int,
+) -> tuple[
+    Float[np.ndarray, " trajectories windows"],
+    Float[np.ndarray, " trajectories windows"],
+]:
+    """Return the smallest and the largest state of every context."""
+    contexts = [
+        trajectories[:, start : start + context_length] for start in window_starts
+    ]
+    return (
+        np.stack([context.min(axis=(1, 2, 3)) for context in contexts], axis=1),
+        np.stack([context.max(axis=(1, 2, 3)) for context in contexts], axis=1),
+    )
+
+
 def intervention_names(num_other_donors: int) -> list[str]:
     """Return the names of the last axis of the errors."""
     others = [f"donor_other_{i}" for i in range(num_other_donors)]
@@ -146,6 +173,7 @@ def write_results(
     donors: Int[np.ndarray, " trajectories donors"],
     permutations: Int[np.ndarray, " trajectories windows context_length"],
     distance: Float[np.ndarray, " trajectories windows donors"],
+    coverage: Float[np.ndarray, " trajectories windows donors"],
     baselines: SegmentBaselines,
     results: dict[str, dict[str, np.ndarray]],
     checkpoints: dict[str, list[Path]],
@@ -167,6 +195,7 @@ def write_results(
         f.create_dataset("donors", data=donors)
         f.create_dataset("permutations", data=permutations.astype(np.int8))
         f.create_dataset("flux_derivative_distance", data=distance)
+        f.create_dataset("state_coverage", data=coverage)
         for field in dataclasses.fields(SegmentErrors):
             f.create_dataset(
                 f"baselines/identity/{field.name}",
@@ -257,6 +286,48 @@ def print_dose_response(
     for b in range(NUM_DISTANCE_BINS):
         cells = "".join(f"{relative[b]:>20.2f}" for relative in per_model)
         print(f"{edges[b]:>8.3f} - {edges[b + 1]:<7.3f}{counts[b]:>10d}{cells}")
+
+
+def print_coverage(
+    coverage: Float[np.ndarray, " trajectories windows donors"],
+    results: dict[str, dict[str, np.ndarray]],
+) -> None:
+    """Print the single-step l2 error of each kind of donor in bins of the state
+    coverage.
+
+    A cell is the mean error with the donor context in the bin divided by the mean
+    error with the true context on the same segments, averaged over the seeds,
+    followed by the number of entries in the bin.
+    """
+    first_donor = len(INTERVENTIONS)
+    true = INTERVENTIONS.index("true")
+    kinds = {"donor_same": slice(0, 1), "donor_other": slice(1, None)}
+    for model_name, fields in results.items():
+        errors = fields["l2_onestep"]
+        print(
+            f"\n{model_name}, l2_onestep relative to the true context, by state "
+            "coverage"
+        )
+        print(f"{'coverage':>16s}" + "".join(f"{kind:>24s}" for kind in kinds))
+        columns = {}
+        for kind, donor_slice in kinds.items():
+            donor = errors[..., first_donor:][..., donor_slice]
+            reference = np.broadcast_to(errors[..., true : true + 1], donor.shape)
+            bin_indices, labels = coverage_bins(coverage[..., donor_slice].reshape(-1))
+            num_bins = len(labels)
+            donor_means, counts = mean_by_bin(
+                donor.reshape(donor.shape[0], -1), bin_indices, num_bins
+            )
+            reference_means, _ = mean_by_bin(
+                reference.reshape(reference.shape[0], -1), bin_indices, num_bins
+            )
+            columns[kind] = ((donor_means / reference_means).mean(axis=0), counts)
+        for b, label in enumerate(labels):
+            cells = "".join(
+                f"{ratio[b]:>14.2f} ({counts[b]:>7d})"
+                for ratio, counts in columns.values()
+            )
+            print(f"{label:>16s}{cells}")
 
 
 def parse_config() -> dict[str, Any]:
@@ -357,6 +428,19 @@ def main() -> None:
         state_max[:, :, None],
     )
     distance = np.where((donors < 0)[:, None, :], np.nan, distance)
+    context_min, context_max = context_intervals(
+        trajectories, window_starts, context_length
+    )
+    last_frames = trajectories[:, list(window_ends)].reshape(
+        *trajectories.shape[:1], len(window_ends), -1
+    )
+    # The interval of a donor context, with the donors along the last axis.
+    coverage = state_coverage(
+        last_frames[:, :, None, :],
+        np.moveaxis(context_min[donors], 1, 2),
+        np.moveaxis(context_max[donors], 1, 2),
+    )
+    coverage = np.where((donors < 0)[:, None, :], np.nan, coverage)
 
     checkpoints = resolve_checkpoints(
         config["checkpoint"], Path(config["checkpoint_root"])
@@ -397,6 +481,7 @@ def main() -> None:
         donors,
         permutations,
         distance,
+        coverage,
         baselines,
         results,
         checkpoints,
@@ -404,6 +489,7 @@ def main() -> None:
     print(f"Wrote {output_path}")
     print_summary(baselines, results, config["num_other_donors"])
     print_dose_response(distance, results)
+    print_coverage(coverage, results)
 
 
 if __name__ == "__main__":

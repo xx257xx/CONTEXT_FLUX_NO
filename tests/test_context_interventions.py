@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from context_flux_no.evaluation import (
+    coverage_bins,
     cubic_wave_speed_distance,
     evaluate_context_interventions,
     evaluate_refresh_rollouts,
@@ -18,6 +19,7 @@ from context_flux_no.evaluation import (
     INTERVENTIONS,
     rollout_with_flux_models,
     rollout_with_refresh,
+    state_coverage,
 )
 from context_flux_no.models.multiphysics import HyperFluxFNOLocal
 from helpers import make_small_hfluxno
@@ -270,3 +272,30 @@ def test_cubic_wave_speed_distance_broadcasts_donors_against_windows():
     assert distance.shape == (2, 3, 2)
     assert np.allclose(distance[0], [2.0, 0.0])
     assert np.allclose(distance[1], [1.0, 0.0])
+
+
+def test_state_coverage_of_listed_states():
+    states = np.asarray([-1.0, -0.5, 0.0, 0.5, 1.0, 2.0])
+    # The ends of the interval count as inside.
+    assert state_coverage(states, np.asarray(-0.5), np.asarray(1.0)) == 4 / 6
+    assert state_coverage(states, np.asarray(-3.0), np.asarray(3.0)) == 1.0
+    assert state_coverage(states, np.asarray(5.0), np.asarray(6.0)) == 0.0
+
+
+def test_state_coverage_broadcasts_donors_against_windows():
+    # Two windows of three cells, against the intervals of two donors.
+    states = np.asarray([[0.0, 1.0, 2.0], [-1.0, 0.0, 1.0]])
+    lower = np.asarray([[0.0, 1.5], [0.0, -2.0]])
+    upper = np.asarray([[2.0, 3.0], [0.5, 2.0]])
+    coverage = state_coverage(states[:, None, :], lower, upper)
+    assert coverage.shape == (2, 2)
+    assert np.allclose(coverage, [[1.0, 1 / 3], [1 / 3, 1.0]])
+
+
+def test_coverage_bins_of_listed_coverages():
+    coverage = np.asarray([0.2, 0.5, 0.79, 0.9, 0.97, 1.0, np.nan])
+    bin_indices, labels = coverage_bins(coverage)
+    # A bin contains its lower edge, and a coverage of exactly 1 has a bin of its own.
+    assert bin_indices.tolist() == [0, 1, 1, 2, 3, 4, -1]
+    assert len(labels) == 5
+    assert labels[-1] == "1"

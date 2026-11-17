@@ -795,6 +795,51 @@ def cubic_wave_speed_distance(
         )
 
 
+def state_coverage(
+    states: Float[np.ndarray, " *#batch x"],
+    lower: Float[np.ndarray, " *#batch"],
+    upper: Float[np.ndarray, " *#batch"],
+) -> Float[np.ndarray, " *batch"]:
+    """Return the fraction of states that lie in an interval.
+
+    In the context interventions (action 3a), `states` are the cells of the state that
+    a model advances, and the interval is the range of states that the context of a
+    donor visited. A fraction below 1 means that the flux generated from the donor is
+    used on states that its context never showed.
+
+    **Arguments:**
+
+    - `states`: The states, with the cells along the last axis.
+    - `lower`: The lower end of the interval. It broadcasts against the leading axes
+        of `states`.
+    - `upper`: The upper end of the interval.
+    """
+    lower = np.asarray(lower)[..., None]
+    upper = np.asarray(upper)[..., None]
+    return ((states >= lower) & (states <= upper)).mean(axis=-1)
+
+
+# The inner edges of the bins of `coverage_bins`. The last bin holds a coverage of
+# exactly 1, the donors whose context covers every cell.
+COVERAGE_EDGES = (0.5, 0.8, 0.95, 1.0)
+
+
+def coverage_bins(
+    coverage: Float[np.ndarray, " n"],
+) -> tuple[Int[np.ndarray, " n"], list[str]]:
+    """Assign each state coverage to a bin of `COVERAGE_EDGES`.
+
+    **Returns:**
+
+    The bin index of each coverage, in the form that `mean_by_bin` takes, and the
+    label of every bin. A coverage that is not finite has the index -1.
+    """
+    indices = np.digitize(coverage, COVERAGE_EDGES)
+    edges = (0.0, *COVERAGE_EDGES)
+    labels = [f"{edges[b]:.2f} - {edges[b + 1]:.2f}" for b in range(len(edges) - 1)]
+    return np.where(np.isfinite(coverage), indices, -1), [*labels, "1"]
+
+
 # --- Flux networks held fixed or generated from another context (actions 3a, 3e) -----
 
 # The contexts that `evaluate_context_interventions` feeds to the encoder before the
