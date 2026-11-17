@@ -9,16 +9,18 @@ checkpoints of the submission:
     python scripts/evaluation/compute_cost.py --preset euler_2d
 
 Every value of a preset is also a command-line argument, and an argument overrides the
-preset. A family without a preset, such as 2D cubic, is described by arguments alone:
+preset. A family without a preset is described by arguments alone, with one
+`--checkpoint NAME=PATH` per model:
 
     python scripts/evaluation/compute_cost.py \
-        --name cubic_2d --loader legacy_hdf5 \
-        --data-path /path/to/2d_cubic_test_100_100.hdf5 \
-        --checkpoint-root /path/to/checkpoints/cubicflux_2d \
-        --checkpoint "DPOT=DPOT/OneStepLoss/seed=0/*" \
-        --checkpoint "HyperFluxFNOLocal=HyperFluxFNOLocal/OneStepLoss/seed=0/*" \
-        --checkpoint "DISCO=DISCO/OneStepLoss/seed=0/*" \
-        --eval-batch 200 --train-batch 64
+        --name <family> --loader legacy_hdf5 --data-path <test file> \
+        --checkpoint-root <checkpoint directory> \
+        --checkpoint "DPOT=<run directory>" --checkpoint "DISCO=<run directory>" \
+        --eval-batch <batch> --train-batch <batch>
+
+The counts and the held-fixed rollout support the model classes of the 1D families and
+of 2D Euler. The 2D cubic HFluxNO of the paper is `HyperFluxFNOLocal2D`, which is not
+on this branch, so 2D cubic is not measured (rebuttal plan, 2026-11-17).
 
 Each model is measured in three ways:
 
