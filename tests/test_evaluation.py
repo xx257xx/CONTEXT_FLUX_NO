@@ -269,25 +269,39 @@ def test_summary_pools_seeds_after_the_exclusion():
     assert two_seeds["fraction_never_crossed"] == pytest.approx(0.5)
 
 
-def test_conservation_drift_summary_of_three_rollouts():
-    """Summarize the drift of three rollouts of three steps, listed by hand.
+def test_conservation_drift_summary_of_pooled_rollouts():
+    """Summarize the drift of two seeds with three rollouts of three steps each.
 
-    Rollout 2 turns non-finite at its last step and is left out of every mean.
+    The last rollout turns non-finite at its last step and is left out. The other five
+    are pooled, and one of them drifts a thousand times more than the rest.
     """
     drift = np.array(
-        [[0.0, 0.2, 0.1], [0.3, 0.1, 0.2], [0.1, 0.1, np.inf]],
+        [
+            [[0.0, 0.2, 0.1], [0.3, 0.1, 0.2], [0.1, 0.1, 0.4]],
+            [[0.2, 0.4, 0.3], [100.0, 300.0, 500.0], [0.1, 0.1, np.inf]],
+        ]
     )[..., None]
     summary = summarize_conservation_drift(drift, horizon=3)
 
-    # Time means 0.1 and 0.2, last steps 0.1 and 0.2, largest values 0.2 and 0.3.
-    np.testing.assert_allclose(summary["mean"], [0.15])
-    np.testing.assert_allclose(summary["final"], [0.15])
-    np.testing.assert_allclose(summary["worst"], [0.25])
-    np.testing.assert_allclose(summary["fraction_finite"], [2 / 3])
-    # A shorter horizon ends before the non-finite step, so all three enter.
-    np.testing.assert_allclose(
-        summarize_conservation_drift(drift, horizon=2)["final"], [0.4 / 3]
-    )
+    # Per rollout, in order: time means 0.1, 0.2, 0.2, 0.3, 300; last steps 0.1, 0.2,
+    # 0.4, 0.3, 500; largest values 0.2, 0.3, 0.4, 0.4, 500. The quartiles of five
+    # sorted values are the second, third and fourth.
+    np.testing.assert_allclose(summary["mean"][:, 0], [0.2, 0.2, 0.3])
+    np.testing.assert_allclose(summary["final"][:, 0], [0.2, 0.3, 0.4])
+    np.testing.assert_allclose(summary["worst"][:, 0], [0.3, 0.4, 0.4])
+    np.testing.assert_allclose(summary["fraction_finite"], [5 / 6])
+    # A shorter horizon ends before the non-finite step, so all six enter. Their last
+    # steps are 0.1, 0.1, 0.1, 0.2, 0.4 and 300, with the median between 0.1 and 0.2.
+    shorter = summarize_conservation_drift(drift, horizon=2)
+    np.testing.assert_allclose(shorter["final"][1], [0.15])
+    np.testing.assert_allclose(shorter["fraction_finite"], [1.0])
+
+
+def test_conservation_drift_summary_without_a_finite_rollout():
+    drift = np.full((2, 3, 1), np.inf)
+    summary = summarize_conservation_drift(drift, horizon=3)
+    assert np.all(np.isnan(summary["mean"]))
+    np.testing.assert_allclose(summary["fraction_finite"], [0.0])
 
 
 # Coefficients (a, b, c) and an interval of states. The cases cover a vertex of f'

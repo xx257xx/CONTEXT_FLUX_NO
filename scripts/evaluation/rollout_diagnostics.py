@@ -535,32 +535,29 @@ def print_conservation_drift(
 ) -> None:
     """Print the conservation drift of the reference and of every model.
 
-    Each model shows the mean and the standard deviation over its seeds of the three
-    numbers of `summarize_conservation_drift`. The reference has no seeds.
+    Each entry is the median over the rollouts, pooled over the seeds of a model, with
+    the 25th and 75th percentiles in brackets. The three columns are the numbers of
+    `summarize_conservation_drift`.
     """
     kinds = ("mean", "final", "worst")
-    reference = summarize_conservation_drift(
-        references.conservation_drift, horizon=horizon
-    )
-    num_channels = references.conservation_drift.shape[-1]
-    print(f"Conservation drift over {horizon} steps, mean ± std over seeds")
-    for channel in range(num_channels):
-        print(f"  channel {channel}" + "".join(f"{kind:>24s}" for kind in kinds))
-        cells = "".join(f"{reference[kind][channel]:>24.3e}" for kind in kinds)
-        print(f"  {'reference':20s}{cells}")
-        for name, evaluations in results.items():
-            per_seed = [
-                summarize_conservation_drift(
-                    e.diagnostics.conservation_drift, horizon=horizon
-                )
-                for e in evaluations
-            ]
+    drifts = {"reference": references.conservation_drift} | {
+        name: np.stack([e.diagnostics.conservation_drift for e in evaluations])
+        for name, evaluations in results.items()
+    }
+    summaries = {
+        name: summarize_conservation_drift(drift, horizon=horizon)
+        for name, drift in drifts.items()
+    }
+    print(f"Conservation drift over {horizon} steps, median [25%, 75%] over rollouts")
+    for channel in range(references.conservation_drift.shape[-1]):
+        print(f"  channel {channel:<12d}" + "".join(f"{kind:>34s}" for kind in kinds))
+        for name, summary in summaries.items():
             cells = ""
             for kind in kinds:
-                values = np.array([summary[kind][channel] for summary in per_seed])
-                cells += f"{values.mean():>13.3e} ± {values.std():.1e}"
-            finite = min(summary["fraction_finite"][channel] for summary in per_seed)
-            note = "" if finite == 1.0 else f"   finite: {finite:.1%} of trajectories"
+                low, median, high = summary[kind][:, channel]
+                cells += f"{median:>12.2e} [{low:.2e}, {high:.2e}]"
+            finite = summary["fraction_finite"][channel]
+            note = "" if finite == 1.0 else f"   finite: {finite:.1%} of rollouts"
             print(f"  {name:20s}{cells}{note}")
 
 

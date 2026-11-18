@@ -416,16 +416,21 @@ def summarize_rollouts(
 
 
 def summarize_conservation_drift(
-    conservation_drift: Float[np.ndarray, " trajectories steps channels"],
+    conservation_drift: Float[np.ndarray, " *batch trajectories steps channels"],
     *,
     horizon: int = 80,
 ) -> dict[str, Any]:
-    """Reduce the conservation drift of one checkpoint to three numbers per channel.
+    """Reduce the conservation drift of one model to three numbers per channel.
 
-    The three numbers are those of the conservation result of the submission. Each is
-    a mean over the trajectories whose drift is finite at every step of the horizon.
-    The caller applies the function to every seed of a model and reports the mean and
-    the standard deviation over the seeds, as for the other tables of the paper.
+    Each rollout gives three numbers: the mean of its drift over the steps, its drift
+    at the last step, and its largest drift. The summary of each is the median over the
+    rollouts with the 25th and 75th percentiles. The leading `*batch` axes, such as the
+    seeds of a model, are pooled with the trajectories, as for the per-step error of the
+    long rollouts. The drift of a diverging rollout grows without bound, so a mean over
+    rollouts would be set by a few of them.
+
+    A rollout whose drift is non-finite at any step of the horizon is left out, and the
+    fraction that remains is returned.
 
     **Arguments:**
 
@@ -435,33 +440,37 @@ def summarize_conservation_drift(
 
     **Returns:**
 
-    A dictionary with the following entries.
+    A dictionary with the following entries. The first three have the shape
+    `(3, channels)` and hold the 25th percentile, the median and the 75th percentile
+    over the rollouts.
 
-    - `mean`: The mean of the drift over the steps and the trajectories.
-    - `final`: The mean over the trajectories of the drift at the last step.
-    - `worst`: The mean over the trajectories of the largest drift of a trajectory.
-    - `fraction_finite`: The fraction of trajectories that enter these means, per
-        channel.
+    - `mean`: The mean of the drift of a rollout over its steps.
+    - `final`: The drift of a rollout at the last step.
+    - `worst`: The largest drift of a rollout.
+    - `fraction_finite`: The fraction of rollouts that enter the summary, per channel.
     """
-    num_steps = conservation_drift.shape[1]
+    num_steps, num_channels = conservation_drift.shape[-2:]
     if num_steps < horizon:
         raise ValueError(f"The rollouts have {num_steps} steps, fewer than {horizon}.")
-    drift = conservation_drift[:, :horizon]
+    drift = conservation_drift[..., :horizon, :].reshape(-1, horizon, num_channels)
     is_finite = np.all(np.isfinite(drift), axis=1)
-    count = is_finite.sum(axis=0)
 
-    def mean_over_finite(
-        per_trajectory: Float[np.ndarray, " trajectories channels"],
-    ) -> Float[np.ndarray, " channels"]:
-        with np.errstate(invalid="ignore", divide="ignore"):
-            return np.where(is_finite, per_trajectory, 0.0).sum(axis=0) / count
+    def quartiles(
+        per_rollout: Float[np.ndarray, " rollouts channels"],
+    ) -> Float[np.ndarray, " 3 channels"]:
+        result = np.full((3, num_channels), np.nan)
+        for channel in range(num_channels):
+            values = per_rollout[is_finite[:, channel], channel]
+            if values.size:
+                result[:, channel] = np.percentile(values, [25, 50, 75])
+        return result
 
     with np.errstate(invalid="ignore"):
         return {
-            "mean": mean_over_finite(drift.mean(axis=1)),
-            "final": mean_over_finite(drift[:, -1]),
-            "worst": mean_over_finite(drift.max(axis=1)),
-            "fraction_finite": count / drift.shape[0],
+            "mean": quartiles(drift.mean(axis=1)),
+            "final": quartiles(drift[:, -1]),
+            "worst": quartiles(drift.max(axis=1)),
+            "fraction_finite": is_finite.mean(axis=0),
         }
 
 
