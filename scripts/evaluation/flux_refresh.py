@@ -1,13 +1,24 @@
-"""Rollout errors of HFluxNO when its flux networks are regenerated every n steps.
+"""Rollout errors of a model whose solver is regenerated from the context every n steps.
 
 This script repeats, on a 1D test set, the experiment of the response to Reviewer AyEF
 of 2026-11-12, which was run on 2D cubic (ICLR 2027 rebuttal plan, action 3e). In the
 rollout of the submission the encoder reads the last context frames at every step and
-the hypernetwork generates new flux networks from them. Here the flux networks are
-generated every n steps and held in between. n = 1 is the rollout of the submission,
-and n equal to the number of rollout steps generates the flux networks once.
+the model generates a new solver from them: HFluxNO its flux networks, the
+concatenation variant of Table 1 its context vector. Here the solver is generated
+every n steps and held in between. n = 1 is the rollout of the submission, and n equal
+to the number of rollout steps generates the solver once.
 
     python scripts/evaluation/flux_refresh.py --preset cubic_1d
+    python scripts/evaluation/flux_refresh.py --preset cubic_1d_concatenation
+
+The second preset runs the concatenation variant (action 4f). Its result decides
+whether the reply to Reviewer DHwv claims that holding the solver fixed favors the
+hypernetwork: only if the last-frame error of the variant at n = 8 falls clearly less
+than the 22% of HFluxNO.
+
+Before any rollout, the script reads the stored configuration of every checkpoint. It
+raises if two checkpoints of one model class differ in more than their context length
+and seed, or if two checkpoints of one name share a seed.
 
 Every value of the preset is also a command-line argument, and an argument overrides
 the preset. `--limit N` restricts a run to the first N trajectories and writes to a
@@ -38,6 +49,7 @@ from context_flux_no.evaluation import (
     RefreshErrors,
 )
 from context_flux_no.training.io import load_model
+from context_length import check_model_configs, read_model_config
 from rollout_diagnostics import load_legacy_hdf5, LoadedTestSet, resolve_checkpoints
 
 
@@ -45,19 +57,31 @@ from rollout_diagnostics import load_legacy_hdf5, LoadedTestSet, resolve_checkpo
 NUM_CHECKED_TRAJECTORIES = 100
 
 _HFLUXNO = "cubicflux_1d/HyperFluxFNOLocal/OneStepLoss"
+_CONCATENATION = "cubicflux_1d/ContextAppendedFluxNO/OneStepLoss"
+_CUBIC_1D = {
+    "data_path": "datasets/cubic_no_source/data/test/"
+    "cubic_no_source_large_test_seed=10.hdf5",
+    "time_stride": 10,
+    "window_starts": list(range(2, 60, 6)),
+}
 # Data paths are relative to --data-root and checkpoints to --checkpoint-root. The
-# window starts are those of the unseen-flux tests (action 1b).
+# window starts are those of the unseen-flux tests (action 1b). The three checkpoints
+# of the concatenation variant share one run directory name.
 PRESETS: dict[str, dict[str, Any]] = {
     "cubic_1d": {
-        "data_path": "datasets/cubic_no_source/data/test/"
-        "cubic_no_source_large_test_seed=10.hdf5",
-        "time_stride": 10,
+        **_CUBIC_1D,
         "checkpoint": [
             f"HyperFluxFNOLocal={_HFLUXNO}/seed=0/26-04-16-00_31_47",
             f"HyperFluxFNOLocal={_HFLUXNO}/seed=10/26-04-17-07_57_49",
             f"HyperFluxFNOLocal={_HFLUXNO}/seed=20/26-04-17-10_50_08",
         ],
-        "window_starts": list(range(2, 60, 6)),
+    },
+    "cubic_1d_concatenation": {
+        **_CUBIC_1D,
+        "checkpoint": [
+            f"ContextAppendedFluxNO={_CONCATENATION}/seed={seed}/26-08-01-21_27_02"
+            for seed in (0, 10, 20)
+        ],
     },
 }
 
@@ -74,6 +98,30 @@ DEFAULTS: dict[str, Any] = {
     "batch_size": 100,
     "gpu": None,
 }
+
+
+def check_distinct_seeds(
+    checkpoints: dict[str, list[Path]], configs: dict[Path, dict[str, Any]]
+) -> None:
+    """Raise if two checkpoints of one name store the same seed, or store none.
+
+    Checkpoints that share a seed would count one training run several times in the
+    spread over seeds.
+
+    **Arguments:**
+
+    - `checkpoints`: The checkpoint directories of every name.
+    - `configs`: The flattened model configuration of every checkpoint, as
+        `read_model_config` returns it.
+    """
+    for name, paths in checkpoints.items():
+        seeds = {path: configs[path].get("key.seed") for path in paths}
+        if None in seeds.values() or len(set(seeds.values())) != len(paths):
+            listing = "\n".join(f"  {path}: {seed}" for path, seed in seeds.items())
+            raise ValueError(
+                f"The checkpoints of {name} do not store distinct seeds under "
+                f"key.seed:\n{listing}"
+            )
 
 
 def write_results(
@@ -166,7 +214,7 @@ def parse_config() -> dict[str, Any]:
         "--refresh-every",
         type=int,
         nargs="+",
-        help="The numbers of steps for which one set of flux networks is used.",
+        help="The numbers of steps for which one solver is used.",
     )
     parser.add_argument("--output-dir")
     parser.add_argument("--limit", type=int)
@@ -207,6 +255,13 @@ def main() -> None:
     checkpoints = resolve_checkpoints(
         config["checkpoint"], Path(config["checkpoint_root"])
     )
+    configs = {
+        path: read_model_config(path)
+        for paths in checkpoints.values()
+        for path in paths
+    }
+    check_model_configs(configs)
+    check_distinct_seeds(checkpoints, configs)
     baselines = evaluate_segment_baselines(
         trajectories, window_starts, chunk_size=config["chunk_size"], **segments
     )

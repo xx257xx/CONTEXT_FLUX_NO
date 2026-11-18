@@ -1,10 +1,11 @@
-"""Checks of the methods that split a step of `HyperFluxFNOLocal`, and of the rollouts
-and context interventions in `context_flux_no.evaluation` that build on them.
+"""Checks of the methods that split a step of an `AbstractGeneratedSolverOperator`, and
+of the rollouts and context interventions in `context_flux_no.evaluation` that build on
+them.
 
 The split methods and the refresh rollout are compared with `__call__` and
 `rollout`, which they must reproduce, and with a loop that is written out step by
-step. The interventions are compared with each other on inputs for which two of them
-read the same frames.
+step, for HFluxNO and for the concatenation variant of Table 1. The interventions are
+compared with each other on inputs for which two of them read the same frames.
 """
 
 import jax.numpy as jnp
@@ -17,12 +18,15 @@ from context_flux_no.evaluation import (
     evaluate_refresh_rollouts,
     evaluate_segments,
     INTERVENTIONS,
-    rollout_with_flux_models,
     rollout_with_refresh,
+    rollout_with_solver,
     state_coverage,
 )
-from context_flux_no.models.multiphysics import HyperFluxFNOLocal
-from helpers import make_small_hfluxno
+from context_flux_no.models.multiphysics import (
+    AbstractGeneratedSolverOperator,
+    HyperFluxFNOLocal,
+)
+from helpers import make_small_concatenation, make_small_hfluxno
 from jaxtyping import Array, Float
 
 
@@ -46,6 +50,13 @@ def model() -> HyperFluxFNOLocal:
     return make_small_hfluxno(NUM_CELLS)
 
 
+@pytest.fixture(scope="module", params=["hfluxno", "concatenation"])
+def solver_model(request) -> AbstractGeneratedSolverOperator:
+    """Every model that implements `generate_solver` and `step`."""
+    make = {"hfluxno": make_small_hfluxno, "concatenation": make_small_concatenation}
+    return make[request.param](NUM_CELLS)
+
+
 @pytest.fixture(scope="module")
 def trajectories() -> Float[np.ndarray, " 4 frames 1 x"]:
     """Four trajectories of smooth waves with different shapes and speeds."""
@@ -60,20 +71,20 @@ def trajectories() -> Float[np.ndarray, " 4 frames 1 x"]:
     return np.stack(waves)[:, :, None, :].astype(np.float32)
 
 
-def test_split_methods_reproduce_call(model, trajectories):
+def test_split_methods_reproduce_call(solver_model, trajectories):
     context = jnp.asarray(trajectories[0, :CONTEXT_LENGTH])
-    expected = model(context, MODEL_ARGS)[0]
-    flux_models = model.generate_flux_models(context)
-    assert np.array_equal(model.step(flux_models, context[-1], MODEL_ARGS), expected)
+    expected = solver_model(context, MODEL_ARGS)[0]
+    solver = solver_model.generate_solver(context)
+    assert np.array_equal(solver_model.step(solver, context[-1], MODEL_ARGS), expected)
 
 
-def test_generated_flux_models_depend_on_the_context(model, trajectories):
-    # Without this dependence the comparisons of the interventions below would hold
-    # for a model that ignores its context.
+def test_generated_solver_depends_on_the_context(solver_model, trajectories):
+    # Without this dependence the comparisons of the interventions and the refresh
+    # rollouts below would hold for a model that ignores its context.
     state = jnp.asarray(trajectories[0, CONTEXT_LENGTH - 1])
     steps = [
-        model.step(
-            model.generate_flux_models(jnp.asarray(u[:CONTEXT_LENGTH])),
+        solver_model.step(
+            solver_model.generate_solver(jnp.asarray(u[:CONTEXT_LENGTH])),
             state,
             MODEL_ARGS,
         )
@@ -82,25 +93,25 @@ def test_generated_flux_models_depend_on_the_context(model, trajectories):
     assert float(jnp.abs(steps[0] - steps[1]).max()) > 1e-4
 
 
-def test_refresh_at_every_step_is_the_rollout_of_the_model(model, trajectories):
+def test_refresh_at_every_step_is_the_rollout_of_the_model(solver_model, trajectories):
     context = jnp.asarray(trajectories[2, :CONTEXT_LENGTH])
-    expected = model.rollout(context, MODEL_ARGS, num_steps=ROLLOUT_STEPS)[0]
-    u_pred = rollout_with_refresh(model, context, MODEL_ARGS, ROLLOUT_STEPS, 1)
+    expected = solver_model.rollout(context, MODEL_ARGS, num_steps=ROLLOUT_STEPS)[0]
+    u_pred = rollout_with_refresh(solver_model, context, MODEL_ARGS, ROLLOUT_STEPS, 1)
     assert np.allclose(u_pred, expected, atol=SAME_OPERATIONS_ATOL)
 
 
 @pytest.mark.parametrize("refresh_every", [2, 3, ROLLOUT_STEPS, ROLLOUT_STEPS + 4])
-def test_refresh_matches_a_loop_written_out(model, trajectories, refresh_every):
+def test_refresh_matches_a_loop_written_out(solver_model, trajectories, refresh_every):
     context = jnp.asarray(trajectories[1, :CONTEXT_LENGTH])
-    window, flux_models, expected = context, None, []
+    window, solver, expected = context, None, []
     for step in range(ROLLOUT_STEPS):
         if step % refresh_every == 0:
-            flux_models = model.generate_flux_models(window)
-        u_next = model.step(flux_models, window[-1], MODEL_ARGS)
+            solver = solver_model.generate_solver(window)
+        u_next = solver_model.step(solver, window[-1], MODEL_ARGS)
         expected.append(u_next)
         window = jnp.concatenate((window[1:], u_next[None]))
     u_pred = rollout_with_refresh(
-        model, context, MODEL_ARGS, ROLLOUT_STEPS, refresh_every
+        solver_model, context, MODEL_ARGS, ROLLOUT_STEPS, refresh_every
     )
     assert u_pred.shape == (ROLLOUT_STEPS, 1, NUM_CELLS)
     assert np.allclose(u_pred, jnp.stack(expected), atol=SAME_OPERATIONS_ATOL)
@@ -113,11 +124,11 @@ def test_refresh_rejects_an_interval_below_one(model, trajectories):
         )
 
 
-def test_refresh_errors_at_one_step_are_the_segment_errors(model, trajectories):
+def test_refresh_errors_at_one_step_are_the_segment_errors(solver_model, trajectories):
     window_starts = (0, 2)
     kwargs = dict(context_length=CONTEXT_LENGTH, rollout_steps=ROLLOUT_STEPS)
     refreshed = evaluate_refresh_rollouts(
-        model,
+        solver_model,
         trajectories,
         window_starts,
         MODEL_ARGS,
@@ -126,7 +137,7 @@ def test_refresh_errors_at_one_step_are_the_segment_errors(model, trajectories):
         **kwargs,
     )
     segments = evaluate_segments(
-        model, trajectories, window_starts, MODEL_ARGS, batch_size=2, **kwargs
+        solver_model, trajectories, window_starts, MODEL_ARGS, batch_size=2, **kwargs
     )
     assert refreshed.l2_rollout.shape == (len(trajectories), len(window_starts), 2)
     assert np.allclose(
@@ -226,13 +237,13 @@ def test_a_missing_donor_has_no_errors(model, trajectories):
     assert np.isfinite(errors.l2_onestep[..., :donor]).all()
 
 
-def test_rollout_with_flux_models_repeats_one_step(model, trajectories):
+def test_rollout_with_solver_repeats_one_step(solver_model, trajectories):
     context = jnp.asarray(trajectories[3, :CONTEXT_LENGTH])
-    flux_models = model.generate_flux_models(context)
-    u_pred = rollout_with_flux_models(model, flux_models, context[-1], MODEL_ARGS, 3)
+    solver = solver_model.generate_solver(context)
+    u_pred = rollout_with_solver(solver_model, solver, context[-1], MODEL_ARGS, 3)
     expected: Float[Array, " 1 x"] = context[-1]
     for step in range(3):
-        expected = model.step(flux_models, expected, MODEL_ARGS)
+        expected = solver_model.step(solver, expected, MODEL_ARGS)
         assert np.allclose(u_pred[step], expected, atol=SAME_OPERATIONS_ATOL)
 
 

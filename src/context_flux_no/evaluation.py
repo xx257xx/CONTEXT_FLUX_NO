@@ -15,9 +15,11 @@ The module also computes the errors of every segment of a test set (actions 5a a
 by their CFL number (action 7c). `scripts/evaluation/context_length.py` applies them.
 
 The last part changes what the encoder of an HFluxNO model reads (actions 3a and 3e).
-`rollout_with_refresh` regenerates the flux networks every few steps, and
-`evaluate_context_interventions` generates them from a shuffled, a static or a donor
-context. `scripts/evaluation/flux_refresh.py` and
+`rollout_with_refresh` regenerates the solver of an `AbstractGeneratedSolverOperator`
+every few steps. The solver of HFluxNO is its flux networks, and that of the
+concatenation variant of Table 1 is its context vector (action 4f).
+`evaluate_context_interventions` generates the flux networks from a shuffled, a static
+or a donor context. `scripts/evaluation/flux_refresh.py` and
 `scripts/evaluation/context_interventions.py` apply them.
 
 `evaluate_effective_flux` evaluates the generated flux network on constant states and
@@ -36,7 +38,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Bool, Float, Int
+from jaxtyping import Array, Bool, Float, Int, PyTree
 from scipy.optimize import lsq_linear
 
 from .metrics import (
@@ -52,7 +54,10 @@ from .metrics import (
     spatial_mean_field,
     valid_horizon,
 )
-from .models.multiphysics.abstract import AbstractMultiphysicsOperator
+from .models.multiphysics.abstract import (
+    AbstractGeneratedSolverOperator,
+    AbstractMultiphysicsOperator,
+)
 from .models.multiphysics.hyperfluxfno import HyperFluxFNOLocal
 from .nn.operators.fourier_utils import append_grid_channels
 
@@ -857,7 +862,7 @@ INTERVENTIONS = ("true", "shuffled", "static")
 
 
 class RefreshErrors(eqx.Module):
-    """Errors of one rollout whose flux networks are regenerated every few steps.
+    """Errors of one rollout whose solver is regenerated every few steps.
 
     **Attributes:**
 
@@ -874,19 +879,19 @@ class RefreshErrors(eqx.Module):
     l_inf_final: Float[Array, ""]
 
 
-def rollout_with_flux_models(
-    model: HyperFluxFNOLocal,
-    flux_models: tuple[eqx.Module, ...],
+def rollout_with_solver(
+    model: AbstractGeneratedSolverOperator,
+    solver: PyTree,
     u: Float[Array, " channels *spatial_dims"],
     args: tuple[float, ...],
     num_steps: int,
 ) -> Float[Array, " {num_steps} channels *spatial_dims"]:
-    """Advance a state by `num_steps` steps with one set of flux networks.
+    """Advance a state by `num_steps` steps with one generated solver.
 
     **Arguments:**
 
     - `model`: The model, already in inference mode.
-    - `flux_models`: The flux networks, as `model.generate_flux_models` returns them.
+    - `solver`: The solver, as `model.generate_solver` returns it.
     - `u`: The state before the first step.
     - `args`: The `args` of `model.step`, such as `(dt, dx)`.
     - `num_steps`: The number of steps.
@@ -897,25 +902,25 @@ def rollout_with_flux_models(
     """
 
     def scan_fn(u_, _):
-        u_next = model.step(flux_models, u_, args)
+        u_next = model.step(solver, u_, args)
         return u_next, u_next
 
     return jax.lax.scan(scan_fn, u, None, length=num_steps)[1]
 
 
 def rollout_with_refresh(
-    model: HyperFluxFNOLocal,
+    model: AbstractGeneratedSolverOperator,
     context: Float[Array, " time channels *spatial_dims"],
     args: tuple[float, ...],
     num_steps: int,
     refresh_every: int,
 ) -> Float[Array, " {num_steps} channels *spatial_dims"]:
-    """Roll a model out and regenerate its flux networks every `refresh_every` steps.
+    """Roll a model out and regenerate its solver every `refresh_every` steps.
 
-    The flux networks are generated from the latest `len(context)` frames, of which
-    the newest are predictions, and are held for `refresh_every` steps. With
-    `refresh_every = 1` this is `model.rollout`. With `refresh_every >= num_steps` the
-    flux networks are generated once from `context`.
+    The solver is generated from the latest `len(context)` frames, of which the newest
+    are predictions, and is held for `refresh_every` steps. With `refresh_every = 1`
+    this is `model.rollout`. With `refresh_every >= num_steps` the solver is generated
+    once from `context`.
 
     **Arguments:**
 
@@ -923,17 +928,15 @@ def rollout_with_refresh(
     - `context`: The context frames.
     - `args`: The `args` of `model.step`, such as `(dt, dx)`.
     - `num_steps`: The number of predicted frames.
-    - `refresh_every`: The number of steps for which one set of flux networks is used.
+    - `refresh_every`: The number of steps for which one solver is used.
     """
     if refresh_every < 1:
         raise ValueError(f"refresh_every must be at least 1, got {refresh_every}.")
     context_length = context.shape[0]
 
     def block_fn(window, _):
-        flux_models = model.generate_flux_models(window)
-        u_block = rollout_with_flux_models(
-            model, flux_models, window[-1], args, refresh_every
-        )
+        solver = model.generate_solver(window)
+        u_block = rollout_with_solver(model, solver, window[-1], args, refresh_every)
         window = jnp.concatenate((window, u_block))[-context_length:]
         return window, u_block
 
@@ -945,7 +948,7 @@ def rollout_with_refresh(
 
 
 def evaluate_refresh_rollouts(
-    model: HyperFluxFNOLocal,
+    model: AbstractGeneratedSolverOperator,
     trajectories: Float[np.ndarray, " trajectories frames channels *spatial_dims"],
     window_starts: tuple[int, ...],
     model_args: tuple[float, ...],
@@ -1095,8 +1098,8 @@ def evaluate_context_interventions(
         )
 
         def one_intervention(encoder_input):
-            flux_models = model.generate_flux_models(encoder_input)
-            u_pred = rollout_with_flux_models(
+            flux_models = model.generate_solver(encoder_input)
+            u_pred = rollout_with_solver(
                 model, flux_models, context[-1], model_args, rollout_steps
             )
             return segment_errors(u_pred, u_data)
@@ -1243,7 +1246,7 @@ def effective_flux(
             "The effective flux is defined for one spatial dimension and one channel, "
             f"got a context of shape {context.shape}."
         )
-    (flux_model,) = model.generate_flux_models(context)
+    (flux_model,) = model.generate_solver(context)
     num_cells = context.shape[-1]
 
     def interface_flux(u: Float[Array, " 1 x"]) -> Float[Array, " x"]:
@@ -1457,7 +1460,7 @@ def evaluate_time_steps(
     step_sizes = [m * dt_stored for m in step_frames]
 
     def one_segment(model, context, targets):
-        flux_models = model.generate_flux_models(context)
+        flux_models = model.generate_solver(context)
         state = context[-1]
         predictions = jnp.stack(
             [model.step(flux_models, state, (dt, *dxs)) for dt in step_sizes]

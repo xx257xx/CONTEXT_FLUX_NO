@@ -1,5 +1,5 @@
 import abc
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import equinox as eqx
 import jax
@@ -7,6 +7,10 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from context_flux_no.utils import num_parameters
+
+
+# The solver that an `AbstractGeneratedSolverOperator` generates from a context.
+SolverT = TypeVar("SolverT")
 
 
 class AbstractMultiphysicsOperator(eqx.Module):
@@ -31,18 +35,6 @@ class AbstractMultiphysicsOperator(eqx.Module):
     ) -> tuple[Float[Array, "channels *grids"], Any]:
         """Return the prediction for the next time step and auxiliary outputs."""
         pass
-
-    #@abc.abstractmethod
-    def encode_context(
-        self,
-        u: Float[Array, "time channels *grids"],
-        args: Any,
-        *,
-        key: PRNGKeyArray | None = None,
-        inference: bool | None = None,
-    ) -> Float[Array, "embedding_dim"]:
-        """Return the context embedding used to condition the operator."""
-        raise NotImplementedError
 
     def rollout(
         self,
@@ -87,3 +79,45 @@ class AbstractMultiphysicsOperator(eqx.Module):
             xs=keys,
             length=num_steps,
         )[1]
+
+
+class AbstractGeneratedSolverOperator(AbstractMultiphysicsOperator, Generic[SolverT]):
+    """Abstract class for operators whose step is a solver generated from the context.
+
+    A step of such an operator has two stages: the context determines a solver, and
+    the solver advances the last state. `generate_solver` and `step` expose the two
+    stages, so that the context and the advanced state can be chosen separately and
+    one solver can advance several steps (ICLR 2027 rebuttal plan, actions 3a, 3e and
+    7c). `step(generate_solver(u), u[-1], args)` equals `__call__(u, args)[0]` for
+    every subclass.
+    """
+
+    @abc.abstractmethod
+    def generate_solver(
+        self,
+        context: Float[Array, "time channels *grids"],
+        *,
+        key: PRNGKeyArray | None = None,
+    ) -> SolverT:
+        """Return the solver that a context determines.
+
+        **Arguments:**
+
+        - `context`: The frames that the encoder reads.
+        """
+
+    @abc.abstractmethod
+    def step(
+        self,
+        solver: SolverT,
+        u: Float[Array, " channels *grids"],
+        args: tuple[float, ...],
+    ) -> Float[Array, " channels *grids"]:
+        """Advance one state by one step with a given solver.
+
+        **Arguments:**
+
+        - `solver`: The solver, as `generate_solver` returns it.
+        - `u`: The state to advance.
+        - `args`: The time step followed by the grid spacing of every spatial dimension.
+        """
